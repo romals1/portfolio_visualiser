@@ -1,4 +1,5 @@
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -11,20 +12,65 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from portfolio_viz.data import _detect_format, load_transactions  # noqa: E402
-from portfolio_viz.prices import fetch_prices_for_tickers  # noqa: E402
+from portfolio_viz.prices import fetch_one_price_series, yahoo_symbol  # noqa: E402
+
+# Process-wide backoff for failed ticker fetches. Successful fetches use
+# st.cache_data with a long TTL; failures aren't cached by st.cache_data
+# (raises bypass it), so this dict provides the short retry cooldown.
+_FAILURE_CACHE: dict[tuple, float] = {}
+_FAILURE_BACKOFF_S = 300  # 5 min
 
 
-@st.cache_data(show_spinner=False)
-def _fetch_prices_cached(
-    tickers: tuple[str, ...],
+@st.cache_data(show_spinner=False, ttl=6 * 3600)
+def _fetch_one_success_cached(
+    yahoo_ticker: str,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> pd.Series:
+    return fetch_one_price_series(yahoo_ticker, start=start, end=end)
+
+
+def _fetch_one_with_backoff(
+    yahoo_ticker: str,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> pd.Series:
+    key = (yahoo_ticker, pd.Timestamp(start).isoformat(), pd.Timestamp(end).isoformat())
+    last_fail = _FAILURE_CACHE.get(key)
+    if last_fail is not None and (time.time() - last_fail) < _FAILURE_BACKOFF_S:
+        remaining = int(_FAILURE_BACKOFF_S - (time.time() - last_fail))
+        raise RuntimeError(f"{yahoo_ticker}: backing off after recent failure (retry in {remaining}s)")
+    try:
+        return _fetch_one_success_cached(yahoo_ticker, start, end)
+    except Exception:
+        _FAILURE_CACHE[key] = time.time()
+        raise
+
+
+def _fetch_prices_safely(
+    tickers: list[str],
     exchange: str,
     start: pd.Timestamp,
     end: pd.Timestamp,
-) -> pd.DataFrame:
-    result = fetch_prices_for_tickers(list(tickers), exchange=exchange, start=start, end=end)
-    if result.empty:
-        raise RuntimeError("No price data returned — will retry next run")
-    return result
+) -> tuple[pd.DataFrame, list[str]]:
+    """Per-ticker fetch with caching. Returns (wide-frame keyed by original ticker, list of failed originals)."""
+    series_map: dict[str, pd.Series] = {}
+    failed: list[str] = []
+    for t in tickers:
+        ys = yahoo_symbol(t, exchange)
+        try:
+            series_map[t] = _fetch_one_with_backoff(ys, start, end)
+        except Exception:
+            failed.append(t)
+    if not series_map:
+        return pd.DataFrame(), failed
+    df = pd.concat(series_map, axis=1).sort_index().dropna(how="all")
+    return df, failed
+
+
+def _clear_price_caches() -> None:
+    _FAILURE_CACHE.clear()
+    _fetch_one_success_cached.clear()
 
 
 def _sum_series(parts: list[pd.Series]) -> pd.Series:
@@ -119,6 +165,7 @@ transactions = transactions.sort_values("date").reset_index(drop=True)
 
 # --- Fetch prices and compute value / net-return series per portfolio ---
 portfolio_groups: dict[str, dict] = {}
+fetch_failures: list[str] = []
 
 for portfolio_name, file_df in transactions.groupby("portfolio"):
     _pv_parts: list[pd.Series] = []
@@ -142,13 +189,14 @@ for portfolio_name, file_df in transactions.groupby("portfolio"):
         end_date = pd.Timestamp.today().normalize() + pd.Timedelta(days=1)
 
         with st.spinner(f"Fetching {portfolio_name} {currency} prices…"):
-            try:
-                prices = _fetch_prices_cached(tuple(tickers), exchange=exchange, start=start_date, end=end_date)
-            except RuntimeError:
-                prices = pd.DataFrame()
+            prices, failed_tickers = _fetch_prices_safely(tickers, exchange, start_date, end_date)
+
+        if failed_tickers:
+            fetch_failures.extend(f"{portfolio_name} ({currency}): {t}" for t in failed_tickers)
+            continue
 
         if prices.empty:
-            st.warning(f"Could not fetch any prices for {portfolio_name} {currency} tickers: {tickers}")
+            fetch_failures.append(f"{portfolio_name} ({currency}): {tickers}")
             continue
 
         # Forward-fill per-ticker gaps (e.g. exchange-specific holidays where only some tickers lack data).
@@ -212,21 +260,21 @@ for portfolio_name, file_df in transactions.groupby("portfolio"):
         # Convert AUD to USD using historical AUD/USD exchange rates
         if currency == "AUD":
             with st.spinner("Fetching AUD/USD rates…"):
-                try:
-                    fx_df = _fetch_prices_cached(("AUDUSD=X",), exchange="US", start=start_date, end=end_date)
-                    fx_rate = fx_df["AUDUSD=X"].reindex(prices.index, method="ffill").bfill()
-                    portfolio_value = portfolio_value * fx_rate
-                    net_return = net_return * fx_rate
-                    symbol_values = symbol_values.multiply(fx_rate, axis=0)
-                    symbol_net_returns = symbol_net_returns.multiply(fx_rate, axis=0)
-                    capital_return = capital_return * fx_rate
-                    total_div_cashflows = total_div_cashflows * fx_rate
-                    symbol_capital_returns = symbol_capital_returns.multiply(fx_rate, axis=0)
-                    symbol_div_cashflows = symbol_div_cashflows.multiply(fx_rate, axis=0)
-                    _disp_currency = "USD"
-                except RuntimeError:
-                    st.warning(f"{portfolio_name}: Could not fetch AUD/USD rates; displaying in AUD.")
-                    _disp_currency = "AUD"
+                fx_df, fx_failed = _fetch_prices_safely(["AUDUSD=X"], "US", start_date, end_date)
+            if fx_failed or fx_df.empty:
+                st.warning(f"{portfolio_name}: Could not fetch AUD/USD rates; displaying in AUD.")
+                _disp_currency = "AUD"
+            else:
+                fx_rate = fx_df["AUDUSD=X"].reindex(prices.index, method="ffill").bfill()
+                portfolio_value = portfolio_value * fx_rate
+                net_return = net_return * fx_rate
+                symbol_values = symbol_values.multiply(fx_rate, axis=0)
+                symbol_net_returns = symbol_net_returns.multiply(fx_rate, axis=0)
+                capital_return = capital_return * fx_rate
+                total_div_cashflows = total_div_cashflows * fx_rate
+                symbol_capital_returns = symbol_capital_returns.multiply(fx_rate, axis=0)
+                symbol_div_cashflows = symbol_div_cashflows.multiply(fx_rate, axis=0)
+                _disp_currency = "USD"
         else:
             _disp_currency = "USD"
 
@@ -254,6 +302,17 @@ for portfolio_name, file_df in transactions.groupby("portfolio"):
         "display_currency": _disp_currency,
         "label": portfolio_name,
     }
+
+if fetch_failures:
+    st.error(
+        "Could not fetch prices for the following — most likely Yahoo Finance rate-limiting. "
+        "Charts are hidden so they don't mislead.\n\n- "
+        + "\n- ".join(fetch_failures)
+    )
+    if st.button("Retry fetching prices", key="retry_prices"):
+        _clear_price_caches()
+        st.rerun()
+    st.stop()
 
 if not portfolio_groups:
     st.error("No portfolio data could be computed. Check that your files contain BUY/SELL rows.")
@@ -326,10 +385,9 @@ if benchmark_tickers:
     bm_start = min(grp["portfolio_value"].index[0] for grp in portfolio_groups.values())
     bm_end = pd.Timestamp.today().normalize() + pd.Timedelta(days=1)
     with st.spinner("Fetching benchmark prices…"):
-        try:
-            benchmark_prices = _fetch_prices_cached(tuple(benchmark_tickers), exchange="US", start=bm_start, end=bm_end)
-        except RuntimeError:
-            benchmark_prices = pd.DataFrame()
+        benchmark_prices, bm_failed = _fetch_prices_safely(benchmark_tickers, "US", bm_start, bm_end)
+    if bm_failed:
+        st.warning(f"Could not fetch benchmark prices for: {', '.join(bm_failed)}")
 
 # --- Chart ---
 multi_portfolio = len(portfolio_groups) > 1

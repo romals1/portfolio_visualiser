@@ -27,9 +27,9 @@ This is a Streamlit app (`src/portfolio_viz/`) with three modules that form a on
 
 1. **`data.py`** — `load_transactions()` parses a user CSV into a normalized DataFrame. DIV rows are stripped at load time; dividends are always sourced from Yahoo Finance instead.
 
-2. **`prices.py`** — `fetch_prices_for_tickers()` is a thin yfinance wrapper. Returns a tz-naive, daily-normalized wide DataFrame (columns = ticker symbols). The yfinance `end` parameter is exclusive, so callers pass `last_transaction_date + 1 day`.
+2. **`prices.py`** — `fetch_one_price_series()` is a thin yfinance wrapper that fetches a single Yahoo ticker. Returns a tz-naive, daily-normalized Series; raises `RuntimeError` on empty/missing data. The yfinance `end` parameter is exclusive, so callers pass `last_transaction_date + 1 day`.
 
-3. **`app.py`** — Streamlit orchestrator. Calls the above in order, builds a daily cumulative positions matrix (`cumsum` of signed quantities) dotted with the aligned prices DataFrame to derive portfolio value. All performance computation is done inline: net return, capital return, dividend return, and rolling annualised return (`_rolling_ann_return`). Supports multiple portfolios, per-symbol views, benchmark overlays, and AUD→USD FX conversion.
+3. **`app.py`** — Streamlit orchestrator. Wraps `fetch_one_price_series` with `_fetch_prices_safely` — a per-ticker fetch using `@st.cache_data` (6h TTL) for successes plus a 5-min process-level `_FAILURE_CACHE` backoff so transient failures (e.g. yfinance rate-limits) are isolated and retried independently. If any portfolio ticker fails the app shows an error with a "Retry fetching prices" button (clears caches via `_clear_price_caches`) and `st.stop()`s rather than plotting misleading data. Otherwise it builds a daily cumulative positions matrix (`cumsum` of signed quantities) times the aligned prices DataFrame to derive portfolio value, and computes net return, capital return, dividend return, and rolling annualised return (`_rolling_ann_return`) inline. Supports multiple portfolios, per-symbol views, benchmark overlays, and AUD→USD FX conversion.
 
 ### Data contract between modules
 
