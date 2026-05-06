@@ -1,0 +1,14 @@
+[tool.ruff.lint]
+# Project-level overrides on top of the global select = ["ALL"]
+ignore = [
+    "ANN",      # type annotations not required for internal helpers
+    "PD901",    # `df` variable name is fine in pandas-heavy code
+    "PD010",    # unstack is idiomatic here; pivot_table would be less clear
+    "PLR2004",  # magic values in numerical algorithms are intentional
+    "C901",     # bisection solver is inherently complex
+    "EM101",    # inline exception messages are fine for this project
+    "TRY003",   # same as EM101
+    "DTZ011",   # local time is sufficient for portfolio date tracking
+    "COM812",   # trailing commas are optional style
+    "RUF005",   # set-unpacking vs concat — both are fine
+]

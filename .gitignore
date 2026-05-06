@@ -6,3 +6,4 @@ __pycache__/
 .data-cache/
 # macOS
 .DS_Store
+data/**

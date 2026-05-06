@@ -1,0 +1,6 @@
+{
+  "python.defaultInterpreterPath": "/Users/rohanmaloney/miniconda3/envs/portfolio-viz/bin/python",
+  "python.terminal.activateEnvironment": true,
+  "python.condaPath": "/Users/rohanmaloney/miniconda3/bin/conda",
+  "python.terminal.activateEnvInCurrentTerminal": true
+}
