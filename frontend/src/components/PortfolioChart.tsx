@@ -183,7 +183,7 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
           legend: { bgcolor: 'rgba(0,0,0,0)', bordercolor: '#374151' },
           xaxis: { gridcolor: '#1f2937', linecolor: '#374151', tickcolor: '#374151' },
           yaxis: {
-            title: yTitle,
+            title: { text: yTitle },
             gridcolor: '#1f2937',
             linecolor: '#374151',
             tickcolor: '#374151',
