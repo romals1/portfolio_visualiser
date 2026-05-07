@@ -1,0 +1,173 @@
+import { useState } from 'react'
+import { ComputeResult, Transaction } from '../types'
+import PortfolioChart from './PortfolioChart'
+
+type View = 'total' | 'by_symbol'
+type Metric = 'portfolio_value' | 'net_return' | 'rolling_return' | 'breakdown'
+type Range = 'All' | 'YTD' | '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y'
+
+interface Props {
+  transactions: Transaction[]
+  computeResult: ComputeResult | null
+  isComputing: boolean
+  computeError: string | null
+  onCompute: (benchmarkTickers: string[]) => void
+  onClearCache: () => void
+}
+
+function RadioGroup<T extends string>({
+  label, options, value, onChange
+}: {
+  label: string
+  options: { value: T; label: string }[]
+  value: T
+  onChange: (v: T) => void
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-gray-500 uppercase tracking-wide">{label}</p>
+      <div className="flex flex-wrap gap-2">
+        {options.map((o) => (
+          <button
+            key={o.value}
+            onClick={() => onChange(o.value)}
+            className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+              value === o.value
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export default function ChartArea({ transactions, computeResult, isComputing, computeError, onCompute, onClearCache }: Props) {
+  const [view, setView] = useState<View>('total')
+  const [metric, setMetric] = useState<Metric>('portfolio_value')
+  const [range, setRange] = useState<Range>('All')
+  const [rollingWindow, setRollingWindow] = useState(60)
+  const [benchmarkInput, setBenchmarkInput] = useState('')
+
+  const benchmarkTickers = benchmarkInput
+    .split(',')
+    .map((t) => t.trim().toUpperCase())
+    .filter(Boolean)
+
+  const handleCompute = () => onCompute(benchmarkTickers)
+
+  const rangeOptions: { value: Range; label: string }[] = [
+    { value: 'All', label: 'All' },
+    { value: 'YTD', label: 'YTD' },
+    { value: '1M', label: '1M' },
+    { value: '3M', label: '3M' },
+    { value: '6M', label: '6M' },
+    { value: '1Y', label: '1Y' },
+    { value: '3Y', label: '3Y' },
+    { value: '5Y', label: '5Y' },
+  ]
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 space-y-5">
+        <h2 className="text-lg font-medium">Chart controls</h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <RadioGroup
+            label="View"
+            options={[
+              { value: 'total', label: 'Total portfolio' },
+              { value: 'by_symbol', label: 'By symbol' },
+            ]}
+            value={view}
+            onChange={setView}
+          />
+          <RadioGroup
+            label="Metric"
+            options={[
+              { value: 'portfolio_value', label: 'Portfolio value' },
+              { value: 'net_return', label: 'Net return' },
+              { value: 'rolling_return', label: 'Rolling return' },
+              { value: 'breakdown', label: 'Return breakdown' },
+            ]}
+            value={metric}
+            onChange={setMetric}
+          />
+        </div>
+
+        <RadioGroup label="Range" options={rangeOptions} value={range} onChange={setRange} />
+
+        {metric === 'rolling_return' && (
+          <div className="space-y-1">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">
+              Rolling window: {rollingWindow} trading days
+            </p>
+            <input
+              type="range"
+              min={10}
+              max={252}
+              step={5}
+              value={rollingWindow}
+              onChange={(e) => setRollingWindow(Number(e.target.value))}
+              className="w-full accent-blue-500"
+            />
+          </div>
+        )}
+
+        <div className="space-y-1">
+          <p className="text-xs text-gray-500 uppercase tracking-wide">Benchmarks</p>
+          <input
+            value={benchmarkInput}
+            onChange={(e) => setBenchmarkInput(e.target.value)}
+            placeholder="Yahoo Finance tickers, comma-separated — e.g. ^AXJO, ^GSPC"
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+          />
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={handleCompute}
+            disabled={isComputing || transactions.length === 0}
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium px-5 py-2 rounded-lg transition-colors"
+          >
+            {isComputing ? 'Computing…' : computeResult ? 'Recompute' : 'Compute'}
+          </button>
+
+          {computeResult && computeResult.failed_tickers.length > 0 && (
+            <button
+              onClick={() => { onClearCache(); handleCompute() }}
+              className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm"
+            >
+              Retry fetching prices
+            </button>
+          )}
+        </div>
+
+        {computeError && (
+          <p className="text-red-400 text-sm">{computeError}</p>
+        )}
+        {computeResult && computeResult.failed_tickers.length > 0 && (
+          <div className="text-yellow-400 text-sm">
+            <p>Could not fetch prices for:</p>
+            <ul className="list-disc list-inside">
+              {computeResult.failed_tickers.map((t) => <li key={t}>{t}</li>)}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {computeResult && (
+        <PortfolioChart
+          result={computeResult}
+          view={view}
+          metric={metric}
+          range={range}
+          rollingWindow={rollingWindow}
+        />
+      )}
+    </div>
+  )
+}
