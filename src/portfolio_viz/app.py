@@ -11,6 +11,7 @@ SRC_DIR = Path(__file__).resolve().parents[1]
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+from portfolio_viz.auth import get_client  # noqa: E402
 from portfolio_viz.data import _detect_format, load_transactions  # noqa: E402
 from portfolio_viz.prices import fetch_one_price_series, yahoo_symbol  # noqa: E402
 
@@ -85,6 +86,61 @@ _EDITOR_COLS = ["date", "ticker", "action", "quantity", "price", "fees", "exchan
 
 st.set_page_config(page_title="Portfolio Returns Viz", layout="wide")
 st.title("Portfolio Returns Viz")
+
+# --- Auth gate ---
+def _show_auth_page() -> None:
+    st.subheader("Sign in to continue")
+    mode = st.radio("", ["Login", "Register"], horizontal=True, label_visibility="collapsed")
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+
+    if mode == "Login":
+        if st.button("Login", type="primary"):
+            if not email or not password:
+                st.error("Please enter your email and password.")
+                return
+            try:
+                client = get_client()
+                resp = client.auth.sign_in_with_password({"email": email, "password": password})
+                st.session_state["_auth_session"] = resp.session
+                st.session_state["_auth_user"] = resp.user
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Login failed: {exc}")
+    else:
+        if st.button("Register", type="primary"):
+            if not email or not password:
+                st.error("Please enter your email and password.")
+                return
+            try:
+                client = get_client()
+                resp = client.auth.sign_up({"email": email, "password": password})
+                if resp.session:
+                    st.session_state["_auth_session"] = resp.session
+                    st.session_state["_auth_user"] = resp.user
+                    st.rerun()
+                else:
+                    st.success("Account created! Check your email to confirm your address, then log in.")
+            except Exception as exc:
+                st.error(f"Registration failed: {exc}")
+
+
+if st.session_state.get("_auth_session") is None:
+    _show_auth_page()
+    st.stop()
+
+with st.sidebar:
+    user_email = getattr(st.session_state.get("_auth_user"), "email", "")
+    st.caption(f"Signed in as {user_email}")
+    if st.button("Logout"):
+        try:
+            get_client().auth.sign_out()
+        except Exception:
+            pass
+        st.session_state.pop("_auth_session", None)
+        st.session_state.pop("_auth_user", None)
+        st.rerun()
+# --- End auth gate ---
 
 uploaded_files = st.file_uploader(
     "Upload brokerage CSV exports (Superhero or Interactive Brokers)",
