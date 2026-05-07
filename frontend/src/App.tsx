@@ -24,6 +24,7 @@ export default function App() {
 
   const handleLogout = async () => {
     try { await api.post('/api/auth/logout') } catch { /* ignore */ }
+    try { await supabase?.auth.signOut() } catch { /* ignore */ }
     localStorage.removeItem('auth_token')
     localStorage.removeItem('user_email')
     setToken(null)
@@ -68,7 +69,8 @@ export default function App() {
     if (!supabase) return
 
     const checkSession = async () => {
-      const { data } = await supabase!.auth.getSession()
+      if (!supabase) return
+      const { data } = await supabase.auth.getSession()
       if (data.session?.user) {
         const userEmail = data.session.user.email || ''
         const accessToken = data.session.access_token
@@ -80,18 +82,27 @@ export default function App() {
 
     const {
       data: { subscription },
-    } = supabase!.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
+    } = supabase.auth.onAuthStateChange(async (event: any, session: any) => {
+      if (event === 'SIGNED_IN' && session?.user) {
         const userEmail = session.user.email || ''
         const accessToken = session.access_token
         handleLogin(accessToken, userEmail)
+      } else if (event === 'INITIAL_SESSION' && !token && session?.user) {
+        const userEmail = session.user.email || ''
+        const accessToken = session.access_token
+        handleLogin(accessToken, userEmail)
+      } else if (event === 'SIGNED_OUT') {
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('user_email')
+        setToken(null)
+        setUserEmail(null)
       }
     })
 
     return () => {
       subscription?.unsubscribe()
     }
-  }, [])
+  }, [token])
 
   if (!token) {
     return <Auth onLogin={handleLogin} />

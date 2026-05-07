@@ -19,12 +19,16 @@ export default function Auth({ onLogin }: Props) {
     try {
       setLoading(true)
       setError(null)
-      await supabase.auth.signInWithOAuth({
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: window.location.origin,
         },
       })
+      if (error) {
+        setError(error.message)
+        setLoading(false)
+      }
     } catch (err: unknown) {
       const msg =
         (err as { message?: string })?.message ?? 'Google sign-in failed'
