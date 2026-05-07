@@ -1,6 +1,7 @@
 services:
   - type: web
     name: portfolio-api
+    plan: free
     env: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
@@ -15,6 +16,7 @@ services:
 
   - type: web
     name: portfolio-frontend
+    plan: free
     env: node
     rootDir: frontend
     buildCommand: npm ci && npm run build
