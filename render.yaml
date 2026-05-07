@@ -16,7 +16,6 @@ services:
 
   - type: web
     name: portfolio-frontend
-    plan: free
     env: static
     rootDir: frontend
     buildCommand: npm ci && npm run build
