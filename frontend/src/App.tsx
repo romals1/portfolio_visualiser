@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Auth from './components/Auth'
 import FileUpload from './components/FileUpload'
 import TransactionTable from './components/TransactionTable'
 import ChartArea from './components/ChartArea'
 import { Transaction, ComputeResult } from './types'
 import api from './api/client'
+import supabase from './api/supabase'
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('auth_token'))
@@ -62,6 +63,35 @@ export default function App() {
   const handleClearCache = async () => {
     try { await api.post('/api/portfolio/clear-cache') } catch { /* ignore */ }
   }
+
+  useEffect(() => {
+    if (!supabase) return
+
+    const checkSession = async () => {
+      const { data } = await supabase!.auth.getSession()
+      if (data.session?.user) {
+        const userEmail = data.session.user.email || ''
+        const accessToken = data.session.access_token
+        handleLogin(accessToken, userEmail)
+      }
+    }
+
+    checkSession()
+
+    const {
+      data: { subscription },
+    } = supabase!.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        const userEmail = session.user.email || ''
+        const accessToken = session.access_token
+        handleLogin(accessToken, userEmail)
+      }
+    })
+
+    return () => {
+      subscription?.unsubscribe()
+    }
+  }, [])
 
   if (!token) {
     return <Auth onLogin={handleLogin} />
