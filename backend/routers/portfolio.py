@@ -7,8 +7,9 @@ import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from ..services.computation import clear_caches, compute_portfolio
-from ..services.data import _detect_format, load_transactions
+from ..services.computation import compute_portfolio
+from ..services.data import load_transactions
+from ..services.prices import fetch_prices_safely, clear_price_caches
 
 router = APIRouter()
 
@@ -29,12 +30,17 @@ class ComputeRequest(BaseModel):
     benchmark_tickers: list[str] = []
 
 
+class PriceRequest(BaseModel):
+    tickers: list[dict[str, str]]  # [{"ticker": "AAPL", "exchange": "US"}, ...]
+    start: str  # "YYYY-MM-DD"
+    end: str  # "YYYY-MM-DD"
+
+
 @router.post("/transactions/parse")
 async def parse_transactions(files: list[UploadFile] = File(...)):
     all_frames: list[pd.DataFrame] = []
     for file in files:
         raw = await file.read()
-        fmt = _detect_format(raw)
         df = load_transactions(io.BytesIO(raw))
         stem = Path(file.filename or "manual").stem
         df["portfolio"] = stem
@@ -48,6 +54,48 @@ async def parse_transactions(files: list[UploadFile] = File(...)):
     cols = ["date", "ticker", "action", "quantity", "price", "fees", "exchange", "portfolio"]
     result = combined.reindex(columns=cols).fillna({"fees": 0.0}).to_dict(orient="records")
     return {"transactions": result}
+
+
+@router.post("/prices")
+async def fetch_prices(request: PriceRequest):
+    """
+    Fetch prices for multiple tickers with optional FX conversion.
+    Returns {prices: {<ticker_key>: {dates: [], values: []}}, failed: []}
+    """
+    start_dt = pd.to_datetime(request.start).normalize()
+    end_dt = pd.to_datetime(request.end).normalize()
+
+    prices_result: dict[str, dict[str, list]] = {}
+    failed: list[str] = []
+
+    # Group tickers by exchange
+    by_exchange: dict[str, list[str]] = {}
+
+    for item in request.tickers:
+        ticker = item.get("ticker", "").upper().strip()
+        exchange = item.get("exchange", "US").upper().strip()
+        if not ticker:
+            continue
+        if exchange not in by_exchange:
+            by_exchange[exchange] = []
+        by_exchange[exchange].append(ticker)
+
+    # Fetch prices per exchange
+    for exchange, tickers in by_exchange.items():
+        df, failed_for_exchange = fetch_prices_safely(tickers, exchange, start_dt, end_dt)
+        failed.extend(f"{t} ({exchange})" for t in failed_for_exchange)
+
+        if not df.empty:
+            for col in df.columns:
+                # col is the original ticker name (before yahoo_symbol conversion)
+                s = df[col].dropna()
+                if not s.empty:
+                    prices_result[col] = {
+                        "dates": s.index.strftime("%Y-%m-%d").tolist(),
+                        "values": [float(v) for v in s.values],
+                    }
+
+    return {"prices": prices_result, "failed": failed}
 
 
 @router.post("/portfolio/compute")
@@ -80,5 +128,5 @@ async def compute(request: ComputeRequest):
 
 @router.post("/portfolio/clear-cache")
 async def clear_price_cache():
-    clear_caches()
+    clear_price_caches()
     return {"message": "Cache cleared"}

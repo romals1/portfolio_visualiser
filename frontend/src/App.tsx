@@ -6,6 +6,7 @@ import ChartArea from './components/ChartArea'
 import { Transaction, ComputeResult } from './types'
 import api from './api/client'
 import supabase from './api/supabase'
+import { computePortfolio } from './lib/computation'
 
 export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('auth_token'))
@@ -44,11 +45,8 @@ export default function App() {
     setIsComputing(true)
     setComputeError(null)
     try {
-      const resp = await api.post('/api/portfolio/compute', {
-        transactions,
-        benchmark_tickers: benchmarkTickers,
-      })
-      setComputeResult(resp.data as ComputeResult)
+      const result = await computePortfolio(transactions, benchmarkTickers)
+      setComputeResult(result)
     } catch (err: unknown) {
       const detail =
         (err as { response?: { data?: { detail?: string } }; message?: string })

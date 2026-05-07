@@ -1,64 +1,10 @@
 from __future__ import annotations
 
-import time
-from threading import Lock
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
-from .prices import fetch_one_price_series, yahoo_symbol
-
-_PRICE_CACHE: dict[tuple, tuple[float, pd.Series]] = {}
-_FAILURE_CACHE: dict[tuple, float] = {}
-_CACHE_LOCK = Lock()
-_SUCCESS_TTL_S = 6 * 3600
-_FAILURE_BACKOFF_S = 300
-
-
-def _fetch_cached(yahoo_ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
-    key = (yahoo_ticker, str(start), str(end))
-    now = time.time()
-    with _CACHE_LOCK:
-        last_fail = _FAILURE_CACHE.get(key)
-        if last_fail is not None and (now - last_fail) < _FAILURE_BACKOFF_S:
-            remaining = int(_FAILURE_BACKOFF_S - (now - last_fail))
-            raise RuntimeError(f"{yahoo_ticker}: backing off (retry in {remaining}s)")
-        cached = _PRICE_CACHE.get(key)
-        if cached is not None:
-            cached_time, series = cached
-            if now - cached_time < _SUCCESS_TTL_S:
-                return series.copy()
-    series = fetch_one_price_series(yahoo_ticker, start=start, end=end)
-    with _CACHE_LOCK:
-        _PRICE_CACHE[key] = (time.time(), series)
-    return series
-
-
-def _fetch_prices_safely(
-    tickers: list[str],
-    exchange: str,
-    start: pd.Timestamp,
-    end: pd.Timestamp,
-) -> tuple[pd.DataFrame, list[str]]:
-    series_map: dict[str, pd.Series] = {}
-    failed: list[str] = []
-    for t in tickers:
-        ys = yahoo_symbol(t, exchange)
-        try:
-            series_map[t] = _fetch_cached(ys, start, end)
-        except Exception:
-            failed.append(t)
-    if not series_map:
-        return pd.DataFrame(), failed
-    df = pd.concat(series_map, axis=1).sort_index().dropna(how="all")
-    return df, failed
-
-
-def clear_caches() -> None:
-    with _CACHE_LOCK:
-        _PRICE_CACHE.clear()
-        _FAILURE_CACHE.clear()
+from .prices import fetch_prices_safely
 
 
 def _sum_series(parts: list[pd.Series]) -> pd.Series:
@@ -104,7 +50,7 @@ def compute_portfolio(
             start_date = trade_rows["date"].min().normalize()
             end_date = pd.Timestamp.today().normalize() + pd.Timedelta(days=1)
 
-            prices, failed_tickers = _fetch_prices_safely(tickers, exchange, start_date, end_date)
+            prices, failed_tickers = fetch_prices_safely(tickers, exchange, start_date, end_date)
 
             if failed_tickers:
                 fetch_failures.extend(f"{portfolio_name} ({currency}): {t}" for t in failed_tickers)
@@ -210,7 +156,7 @@ def compute_portfolio(
     if benchmark_tickers and portfolio_groups:
         bm_start = min(grp["portfolio_value"].index[0] for grp in portfolio_groups.values())
         bm_end = pd.Timestamp.today().normalize() + pd.Timedelta(days=1)
-        bm_prices, _ = _fetch_prices_safely(benchmark_tickers, "US", bm_start, bm_end)
+        bm_prices, _ = fetch_prices_safely(benchmark_tickers, "US", bm_start, bm_end)
         for bm in benchmark_tickers:
             if bm in bm_prices.columns:
                 s = bm_prices[bm].dropna()
