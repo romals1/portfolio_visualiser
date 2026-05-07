@@ -4,30 +4,13 @@ import io
 from pathlib import Path
 
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, UploadFile
 from pydantic import BaseModel
 
-from ..services.computation import compute_portfolio
 from ..services.data import load_transactions
 from ..services.prices import fetch_prices_safely, clear_price_caches
 
 router = APIRouter()
-
-
-class TransactionRow(BaseModel):
-    date: str
-    ticker: str
-    action: str
-    quantity: float
-    price: float
-    fees: float = 0.0
-    exchange: str
-    portfolio: str
-
-
-class ComputeRequest(BaseModel):
-    transactions: list[TransactionRow]
-    benchmark_tickers: list[str] = []
 
 
 class PriceRequest(BaseModel):
@@ -60,7 +43,10 @@ async def parse_transactions(files: list[UploadFile] = File(...)):
 async def fetch_prices(request: PriceRequest):
     """
     Fetch prices for multiple tickers with optional FX conversion.
-    Returns {prices: {<ticker_key>: {dates: [], values: []}}, failed: []}
+    Returns {prices: {<ticker>: {dates: [], values: []}}, failed: []}
+
+    Note: Returns are keyed by ticker symbol (e.g., "AAPL", "AUDUSD=X") for simplicity.
+    For production with cross-exchange symbol collisions, consider keying by f"{exchange}:{ticker}".
     """
     start_dt = pd.to_datetime(request.start).normalize()
     end_dt = pd.to_datetime(request.end).normalize()
@@ -96,34 +82,6 @@ async def fetch_prices(request: PriceRequest):
                     }
 
     return {"prices": prices_result, "failed": failed}
-
-
-@router.post("/portfolio/compute")
-async def compute(request: ComputeRequest):
-    if not request.transactions:
-        raise HTTPException(status_code=400, detail="No transactions provided")
-
-    df = pd.DataFrame([t.model_dump() for t in request.transactions])
-    df = df.dropna(subset=["ticker", "action", "quantity", "price", "exchange"])
-    if df.empty:
-        raise HTTPException(status_code=400, detail="No valid transactions after filtering")
-
-    df["date"] = pd.to_datetime(df["date"])
-    df["ticker"] = df["ticker"].str.strip().str.upper()
-    df["action"] = df["action"].str.strip().str.upper()
-    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0).abs()
-    df["fees"] = pd.to_numeric(df["fees"], errors="coerce").fillna(0)
-    df["portfolio"] = df["portfolio"].fillna("manual").replace("", "manual")
-    df["currency"] = df["exchange"].map({"ASX": "AUD", "US": "USD"})
-    df["net_amount"] = df.apply(
-        lambda r: -(r["quantity"] * r["price"] + r["fees"]) if r["action"] == "BUY"
-        else r["quantity"] * r["price"] - r["fees"],
-        axis=1,
-    )
-    df = df.sort_values("date").reset_index(drop=True)
-
-    result = compute_portfolio(df, benchmark_tickers=request.benchmark_tickers)
-    return result
 
 
 @router.post("/portfolio/clear-cache")

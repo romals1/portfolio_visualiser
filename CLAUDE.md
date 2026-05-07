@@ -32,18 +32,17 @@ cd frontend && npm install
 
 ## Architecture
 
-React + TypeScript + Vite frontend (`frontend/`) backed by a FastAPI + uvicorn API (`backend/`). The frontend proxies `/api` to `localhost:8000` in development via Vite config.
+React + TypeScript + Vite frontend (`frontend/`) backed by a FastAPI + uvicorn API (`backend/`). The frontend proxies `/api` to `localhost:8000` in development via Vite config. **All portfolio computation is now client-side in TypeScript.**
 
 ### Backend (`backend/`)
 
-One-way pipeline: routers call services; services never call routers.
+Thin API for price fetching and CSV parsing. One-way pipeline: routers call services; services never call routers.
 
 - **`services/data.py`** — `load_transactions()` auto-detects CSV format ("superhero", "ib", "manual") and returns a normalised DataFrame. DIV rows from user CSVs are kept but stripped of quantity/price; dividends from Yahoo Finance are the authoritative source.
-- **`services/prices.py`** — `fetch_one_price_series()` fetches adjusted daily close from yfinance. Returns tz-naive Series; raises `RuntimeError` on empty/all-NaN data. `end` param is exclusive; callers pass `last_date + 1 day`.
-- **`services/computation.py`** — `compute_portfolio(transactions_df, benchmark_tickers)` groups by portfolio → currency, fetches prices, builds cumulative positions (`cumsum` of signed quantities), computes portfolio value, net/capital/dividend returns, and optionally converts AUD→USD via `AUDUSD=X`. Thread-safe price cache: 6 h TTL on successes, 5 min backoff on failures. Returns JSON-serialisable dict.
+- **`services/prices.py`** — `fetch_one_price_series()` fetches adjusted daily close from yfinance. Returns tz-naive Series; raises `RuntimeError` on empty/all-NaN data. `end` param is exclusive; callers pass `last_date + 1 day`. Thread-safe price cache: 6 h TTL on successes, 5 min backoff on failures.
 - **`services/auth.py`** — Supabase client factory from `SUPABASE_URL` / `SUPABASE_ANON_KEY` env vars.
 - **`routers/auth.py`** — `POST /api/auth/login`, `/register`, `/logout`. Auth is skipped gracefully if Supabase env vars are absent.
-- **`routers/portfolio.py`** — `POST /api/transactions/parse` (multipart CSV upload), `POST /api/portfolio/compute`, `POST /api/portfolio/clear-cache`.
+- **`routers/portfolio.py`** — `POST /api/transactions/parse` (multipart CSV upload), `POST /api/prices` (fetch prices for multiple tickers), `POST /api/portfolio/clear-cache` (clear price cache).
 
 ### Frontend (`frontend/src/`)
 
@@ -53,6 +52,7 @@ One-way pipeline: routers call services; services never call routers.
 - **`components/TransactionTable.tsx`** — controlled editable table; add/delete rows, CSV download.
 - **`components/ChartArea.tsx`** — chart controls (view, metric, range, rolling window, benchmarks) + Compute button.
 - **`components/PortfolioChart.tsx`** — Plotly chart. Rolling annualised return is computed client-side. Benchmark prices are scaled to the first portfolio's initial value.
+- **`lib/computation.ts`** — core portfolio computation engine: groups transactions by portfolio/currency, batches price fetch via `/api/prices`, aligns cashflows to price-bar dates using `alignToAxis()`, builds cumulative positions and returns, handles AUD→USD conversion. Returns all symbol-level data.
 - **`api/client.ts`** — axios instance; attaches `Authorization: Bearer <token>` from localStorage on every request.
 
 ### Data contract

@@ -47,6 +47,35 @@ function forwardFillPrices(
   return result
 }
 
+function alignToAxis(
+  events: { date: string; value: number }[],
+  axis: string[]
+): number[] {
+  const result = new Array(axis.length).fill(0)
+  const sorted = [...events].sort((a, b) => a.date.localeCompare(b.date))
+  let i = 0
+  for (const ev of sorted) {
+    while (i < axis.length && axis[i] < ev.date) i++
+    if (i >= axis.length) {
+      // event after last bar — drop with warning
+      console.warn(`Transaction on ${ev.date} is after last price bar; dropping cashflow`)
+      break
+    }
+    result[i] += ev.value
+  }
+  return result
+}
+
+function cumsum(xs: number[]): number[] {
+  const out = new Array(xs.length).fill(0)
+  let s = 0
+  for (let i = 0; i < xs.length; i++) {
+    s += xs[i]
+    out[i] = s
+  }
+  return out
+}
+
 function sumSeries(parts: number[][]): number[] {
   if (parts.length === 0) return []
   if (parts.length === 1) return parts[0]
@@ -128,6 +157,83 @@ export async function computePortfolio(
     portfolioMap.get(key)!.txns.push(txn)
   }
 
+  // Collect all ticker/exchange pairs needed across all portfolios
+  const allTickersToFetch = new Set<string>()
+  const tickersByExchange: Record<string, Set<string>> = {}
+  let needsAUD = false
+
+  for (const { txns: portfolioTxns } of portfolioMap.values()) {
+    const currencyMap = new Map<string, TransactionWithFields[]>()
+    for (const txn of portfolioTxns) {
+      const key = txn.currency
+      if (!currencyMap.has(key)) {
+        currencyMap.set(key, [])
+      }
+      currencyMap.get(key)!.push(txn)
+    }
+
+    for (const [currency, currencyTxns] of currencyMap) {
+      const tradeRows = currencyTxns.filter(t => ['BUY', 'SELL'].includes(t.action))
+      if (tradeRows.length === 0) continue
+
+      const exchange = tradeRows[0].exchange
+      for (const txn of tradeRows) {
+        allTickersToFetch.add(`${exchange}:${txn.ticker}`)
+        if (!tickersByExchange[exchange]) {
+          tickersByExchange[exchange] = new Set()
+        }
+        tickersByExchange[exchange].add(txn.ticker)
+      }
+      if (currency === 'AUD') {
+        needsAUD = true
+      }
+    }
+  }
+
+  if (needsAUD) {
+    allTickersToFetch.add('US:AUDUSD=X')
+    if (!tickersByExchange['US']) {
+      tickersByExchange['US'] = new Set()
+    }
+    tickersByExchange['US'].add('AUDUSD=X')
+  }
+
+  // Calculate min/max transaction dates
+  let minTxnDate = formatDate(new Date())
+  let maxTxnDate = formatDate(new Date())
+  if (txns.length > 0) {
+    minTxnDate = txns.reduce((min, t) => t.date < min ? t.date : min, txns[0].date)
+    maxTxnDate = txns.reduce((max, t) => t.date > max ? t.date : max, txns[0].date)
+  }
+
+  const startDate = new Date(minTxnDate + 'T00:00:00Z')
+  const endDate = new Date(maxTxnDate + 'T00:00:00Z')
+  endDate.setUTCDate(endDate.getUTCDate() + 1)
+
+  const startStr = formatDate(startDate)
+  const endStr = formatDate(endDate)
+
+  // Single batched price fetch for all tickers
+  let allPricesData: Record<string, PriceData> = {}
+  let allFailedTickers: string[] = []
+  if (allTickersToFetch.size > 0) {
+    try {
+      const ticketList = Array.from(allTickersToFetch).map(key => {
+        const [exchange, ticker] = key.split(':')
+        return { ticker, exchange }
+      })
+      const resp = await api.post<PricesResponse>('/api/prices', {
+        tickers: ticketList,
+        start: startStr,
+        end: endStr,
+      })
+      allPricesData = resp.data.prices
+      allFailedTickers = resp.data.failed || []
+    } catch (err) {
+      allFailedTickers = Array.from(allTickersToFetch)
+    }
+  }
+
   for (const [portfolioName, { txns: portfolioTxns }] of portfolioMap) {
     const pvParts: number[][] = []
     const nrParts: number[][] = []
@@ -155,32 +261,13 @@ export async function computePortfolio(
 
       const exchange = tradeRows[0].exchange
       const tickers = Array.from(new Set(tradeRows.map(t => t.ticker)))
-      const startDate = new Date(Math.min(...tradeRows.map(t => parseDate(t.date).getTime())))
-      const endDate = new Date()
-      endDate.setUTCDate(endDate.getUTCDate() + 1)
 
-      const startStr = formatDate(startDate)
-      const endStr = formatDate(endDate)
-
+      // Use pre-fetched prices
       let pricesData: Record<string, PriceData> = {}
-      let failedTickers: string[] = []
-
-      try {
-        const priceTickets = tickers.map(t => ({ ticker: t, exchange }))
-        if (currency === 'AUD') {
-          priceTickets.push({ ticker: 'AUDUSD=X', exchange: 'US' })
+      for (const ticker of tickers) {
+        if (ticker in allPricesData) {
+          pricesData[ticker] = allPricesData[ticker]
         }
-
-        const resp = await api.post<PricesResponse>('/api/prices', {
-          tickers: priceTickets,
-          start: startStr,
-          end: endStr,
-        })
-
-        pricesData = resp.data.prices
-        failedTickers = resp.data.failed || []
-      } catch (err) {
-        failedTickers = tickers
       }
 
       const missingTickers = tickers.filter(t => !(t in pricesData))
@@ -206,36 +293,17 @@ export async function computePortfolio(
         prices[ticker] = forwardFillPrices(data.values, data.dates, sortedDates)
       }
 
-      const signedQties: Record<string, Record<string, number>> = {}
-      for (const txn of tradeRows) {
-        const txnDate = txn.date
-        if (!(txnDate in signedQties)) {
-          signedQties[txnDate] = {}
-        }
-        const signedQty = txn.action === 'BUY' ? txn.quantity : -txn.quantity
-        signedQties[txnDate][txn.ticker] = (signedQties[txnDate][txn.ticker] || 0) + signedQty
-      }
-
+      // Align signed quantities to price dates using alignment function
       const positions: Record<string, number[]> = {}
       for (const ticker of tickers) {
-        positions[ticker] = Array(sortedDates.length).fill(0)
-      }
-
-      let cumQties: Record<string, number> = {}
-      for (const ticker of tickers) {
-        cumQties[ticker] = 0
-      }
-
-      for (let i = 0; i < sortedDates.length; i++) {
-        const date = sortedDates[i]
-        if (date in signedQties) {
-          for (const ticker in signedQties[date]) {
-            cumQties[ticker] += signedQties[date][ticker]
-          }
-        }
-        for (const ticker of tickers) {
-          positions[ticker][i] = cumQties[ticker]
-        }
+        const qtyEvents = tradeRows
+          .filter(t => t.ticker === ticker)
+          .map(t => ({
+            date: t.date,
+            value: t.action === 'BUY' ? t.quantity : -t.quantity,
+          }))
+        const aligned = alignToAxis(qtyEvents, sortedDates)
+        positions[ticker] = cumsum(aligned)
       }
 
       const symbolValues: Record<string, number[]> = {}
@@ -247,38 +315,17 @@ export async function computePortfolio(
         return tickers.reduce((sum, t) => sum + (symbolValues[t][i] || 0), 0)
       })
 
+      // Align all (BUY/SELL/DIV) cashflows to price dates
       const symbolCashflows: Record<string, number[]> = {}
       for (const ticker of tickers) {
-        symbolCashflows[ticker] = Array(sortedDates.length).fill(0)
-      }
-
-      const cashflowsByDate: Record<string, Record<string, number>> = {}
-      for (const txn of currencyTxns) {
-        if (!['BUY', 'SELL', 'DIV'].includes(txn.action)) continue
-        if (!(txn.date in cashflowsByDate)) {
-          cashflowsByDate[txn.date] = {}
-        }
-        if (!(txn.ticker in cashflowsByDate[txn.date])) {
-          cashflowsByDate[txn.date][txn.ticker] = 0
-        }
-        cashflowsByDate[txn.date][txn.ticker] += txn.net_amount
-      }
-
-      let cumCashflows: Record<string, number> = {}
-      for (const ticker of tickers) {
-        cumCashflows[ticker] = 0
-      }
-
-      for (let i = 0; i < sortedDates.length; i++) {
-        const date = sortedDates[i]
-        if (date in cashflowsByDate) {
-          for (const ticker in cashflowsByDate[date]) {
-            cumCashflows[ticker] = (cumCashflows[ticker] || 0) + cashflowsByDate[date][ticker]
-          }
-        }
-        for (const ticker of tickers) {
-          symbolCashflows[ticker][i] = cumCashflows[ticker] || 0
-        }
+        const cfEvents = currencyTxns
+          .filter(t => t.ticker === ticker && ['BUY', 'SELL', 'DIV'].includes(t.action))
+          .map(t => ({
+            date: t.date,
+            value: t.net_amount,
+          }))
+        const aligned = alignToAxis(cfEvents, sortedDates)
+        symbolCashflows[ticker] = cumsum(aligned)
       }
 
       const symbolNetReturns: Record<string, number[]> = {}
@@ -289,38 +336,17 @@ export async function computePortfolio(
       const totalCashflows = sortedDates.map((_, i) => tickers.reduce((sum, t) => sum + (symbolCashflows[t][i] || 0), 0))
       const netReturn = portfolioValue.map((pv, i) => pv + totalCashflows[i])
 
+      // Align DIV-only cashflows to price dates
       const symbolDivCashflows: Record<string, number[]> = {}
       for (const ticker of tickers) {
-        symbolDivCashflows[ticker] = Array(sortedDates.length).fill(0)
-      }
-
-      const divCashflowsByDate: Record<string, Record<string, number>> = {}
-      for (const txn of currencyTxns) {
-        if (txn.action !== 'DIV') continue
-        if (!(txn.date in divCashflowsByDate)) {
-          divCashflowsByDate[txn.date] = {}
-        }
-        if (!(txn.ticker in divCashflowsByDate[txn.date])) {
-          divCashflowsByDate[txn.date][txn.ticker] = 0
-        }
-        divCashflowsByDate[txn.date][txn.ticker] += txn.net_amount
-      }
-
-      let cumDivCashflows: Record<string, number> = {}
-      for (const ticker of tickers) {
-        cumDivCashflows[ticker] = 0
-      }
-
-      for (let i = 0; i < sortedDates.length; i++) {
-        const date = sortedDates[i]
-        if (date in divCashflowsByDate) {
-          for (const ticker in divCashflowsByDate[date]) {
-            cumDivCashflows[ticker] = (cumDivCashflows[ticker] || 0) + divCashflowsByDate[date][ticker]
-          }
-        }
-        for (const ticker of tickers) {
-          symbolDivCashflows[ticker][i] = cumDivCashflows[ticker] || 0
-        }
+        const divEvents = currencyTxns
+          .filter(t => t.ticker === ticker && t.action === 'DIV')
+          .map(t => ({
+            date: t.date,
+            value: t.net_amount,
+          }))
+        const aligned = alignToAxis(divEvents, sortedDates)
+        symbolDivCashflows[ticker] = cumsum(aligned)
       }
 
       const symbolCapitalReturns: Record<string, number[]> = {}
@@ -342,7 +368,22 @@ export async function computePortfolio(
 
       if (currency === 'AUD' && 'AUDUSD=X' in pricesData) {
         const fxData = pricesData['AUDUSD=X']
-        const fxRate = forwardFillPrices(fxData.values, fxData.dates, sortedDates)
+        let fxRate = forwardFillPrices(fxData.values, fxData.dates, sortedDates)
+
+        // Back-fill leading NaNs to prevent NaN propagation
+        let firstValidIndex = -1
+        for (let i = 0; i < fxRate.length; i++) {
+          if (!isNaN(fxRate[i])) {
+            firstValidIndex = i
+            break
+          }
+        }
+        if (firstValidIndex > 0) {
+          const firstValidValue = fxRate[firstValidIndex]
+          for (let i = 0; i < firstValidIndex; i++) {
+            fxRate[i] = firstValidValue
+          }
+        }
 
         pvToAdd = portfolioValue.map((pv, i) => pv * fxRate[i])
         nrToAdd = netReturn.map((nr, i) => nr * fxRate[i])
