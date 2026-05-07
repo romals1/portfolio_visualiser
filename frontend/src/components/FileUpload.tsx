@@ -4,9 +4,10 @@ import { Transaction } from '../types'
 
 interface Props {
   onTransactionsParsed: (txns: Transaction[]) => void
+  onClear: () => void
 }
 
-export default function FileUpload({ onTransactionsParsed }: Props) {
+export default function FileUpload({ onTransactionsParsed, onClear }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -23,7 +24,7 @@ export default function FileUpload({ onTransactionsParsed }: Props) {
       const resp = await api.post('/api/transactions/parse', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      setFileNames(files.map((f) => f.name))
+      setFileNames((prev: string[]) => [...new Set([...prev, ...files.map((f: File) => f.name)])])
       onTransactionsParsed(resp.data.transactions as Transaction[])
     } catch (err: unknown) {
       const msg =
@@ -35,6 +36,11 @@ export default function FileUpload({ onTransactionsParsed }: Props) {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleClear = () => {
+    setFileNames([])
+    onClear()
   }
 
   const handleDrop = (e: React.DragEvent) => {
@@ -86,7 +92,15 @@ export default function FileUpload({ onTransactionsParsed }: Props) {
       </div>
 
       {fileNames.length > 0 && (
-        <p className="text-sm text-gray-400">Loaded: {fileNames.join(', ')}</p>
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-gray-400">Loaded: {fileNames.join(', ')}</p>
+          <button
+            onClick={handleClear}
+            className="text-xs text-gray-500 hover:text-red-400 transition-colors"
+          >
+            Clear all
+          </button>
+        </div>
       )}
       {error && <p className="text-sm text-red-400">{error}</p>}
     </div>
