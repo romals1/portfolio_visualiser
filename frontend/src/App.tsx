@@ -22,6 +22,9 @@ export default function App() {
   const computeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const computeRequestIdRef = useRef(0)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const hasLoadedRef = useRef(false)
+  const loadCancelledRef = useRef(false)
+  const skipNextSaveRef = useRef(false)
 
   const handleLogin = (tok: string, email: string) => {
     localStorage.setItem('auth_token', tok)
@@ -50,6 +53,9 @@ export default function App() {
   }
 
   const handleTransactionsParsed = (newTxns: Transaction[]) => {
+    // User is taking action; ensure any in-flight initial load can't overwrite this.
+    loadCancelledRef.current = true
+    hasLoadedRef.current = true
     setTransactions((prev: Transaction[]) => {
       const newPortfolios = new Set(newTxns.map((t: Transaction) => t.portfolio))
       const kept = prev.filter((t: Transaction) => !newPortfolios.has(t.portfolio))
@@ -60,6 +66,8 @@ export default function App() {
   }
 
   const handleClearTransactions = () => {
+    loadCancelledRef.current = true
+    hasLoadedRef.current = true
     setTransactions([])
     setComputeResult(null)
     setComputeError(null)
@@ -119,24 +127,46 @@ export default function App() {
   // Load transactions on mount when token is available
   useEffect(() => {
     if (!token) return
+    // Reset per-session: a new token means a new user/login.
+    hasLoadedRef.current = false
+    loadCancelledRef.current = false
+    skipNextSaveRef.current = false
 
     const loadTransactions = async () => {
       try {
         const resp = await api.get('/api/transactions')
+        // If the user uploaded/cleared while we were loading, drop the result.
+        if (loadCancelledRef.current) return
         if (resp.data?.transactions && Array.isArray(resp.data.transactions)) {
+          // Mark load complete and tell the save effect to ignore the
+          // upcoming state-change echo of the freshly-loaded data.
+          hasLoadedRef.current = true
+          if (resp.data.transactions.length > 0) {
+            skipNextSaveRef.current = true
+          }
           setTransactions(resp.data.transactions)
+          return
         }
+        hasLoadedRef.current = true
       } catch {
         // Silently fail if endpoint not available (e.g., Supabase not configured)
+        hasLoadedRef.current = true
       }
     }
 
     loadTransactions()
   }, [token])
 
-  // Debounced save transactions whenever they change
+  // Debounced save transactions whenever they change (after initial load completes)
   useEffect(() => {
-    if (!token || transactions.length === 0) return
+    if (!token) return
+    // Skip the initial-load write-back: don't save until load has finished.
+    if (!hasLoadedRef.current) return
+    // Skip the echo of the freshly-loaded data.
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false
+      return
+    }
 
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current)
