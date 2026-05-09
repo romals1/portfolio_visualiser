@@ -106,8 +106,13 @@ async def get_user_id_from_token(authorization: str | None = Header(None)) -> st
 
     try:
         client = get_client()
-        user = client.auth.get_user(token)
-        return str(user.id)
+        resp = client.auth.get_user(token)
+        # supabase-py returns a UserResponse object: resp.user.id is the UUID
+        if not resp or not getattr(resp, "user", None) or not getattr(resp.user, "id", None):
+            raise HTTPException(status_code=401, detail="Invalid token: no user")
+        return str(resp.user.id)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=401, detail=f"Invalid token: {str(exc)}")
 
