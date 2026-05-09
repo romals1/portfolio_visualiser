@@ -34,8 +34,18 @@ export default function App() {
     setComputeResult(null)
   }
 
-  const handleTransactionsParsed = (txns: Transaction[]) => {
-    setTransactions(txns)
+  const handleTransactionsParsed = (newTxns: Transaction[]) => {
+    setTransactions((prev: Transaction[]) => {
+      const newPortfolios = new Set(newTxns.map((t: Transaction) => t.portfolio))
+      const kept = prev.filter((t: Transaction) => !newPortfolios.has(t.portfolio))
+      return [...kept, ...newTxns].sort((a: Transaction, b: Transaction) => a.date.localeCompare(b.date))
+    })
+    setComputeResult(null)
+    setComputeError(null)
+  }
+
+  const handleClearTransactions = () => {
+    setTransactions([])
     setComputeResult(null)
     setComputeError(null)
   }
@@ -122,7 +132,7 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-        <FileUpload onTransactionsParsed={handleTransactionsParsed} />
+        <FileUpload onTransactionsParsed={handleTransactionsParsed} onClear={handleClearTransactions} />
 
         {transactions.length > 0 && (
           <>
