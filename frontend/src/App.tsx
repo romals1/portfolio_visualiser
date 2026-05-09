@@ -9,6 +9,8 @@ import api from './api/client'
 import supabase from './api/supabase'
 import { computePortfolio } from './lib/computation'
 
+const authEnabled = supabase !== null
+
 export default function App() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('auth_token'))
   const [userEmail, setUserEmail] = useState<string | null>(() => localStorage.getItem('user_email'))
@@ -150,7 +152,7 @@ export default function App() {
     }
   }, [token])
 
-  if (!token) {
+  if (authEnabled && !token) {
     return <Auth onLogin={handleLogin} />
   }
 
@@ -158,15 +160,17 @@ export default function App() {
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
         <h1 className="text-xl font-semibold">Portfolio Returns Viz</h1>
-        <div className="flex items-center gap-4">
-          {userEmail && <span className="text-sm text-gray-400">{userEmail}</span>}
-          <button
-            onClick={handleLogout}
-            className="text-sm text-gray-400 hover:text-white transition-colors"
-          >
-            Logout
-          </button>
-        </div>
+        {authEnabled && (
+          <div className="flex items-center gap-4">
+            {userEmail && <span className="text-sm text-gray-400">{userEmail}</span>}
+            <button
+              onClick={handleLogout}
+              className="text-sm text-gray-400 hover:text-white transition-colors"
+            >
+              Logout
+            </button>
+          </div>
+        )}
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">

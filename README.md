@@ -42,6 +42,10 @@ npm run dev     # proxies /api → localhost:8000
 
 App runs at `http://localhost:5173`.
 
+### Auth
+
+Auth is gated on whether Supabase is configured. Leave `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` (frontend) and `SUPABASE_URL` / `SUPABASE_ANON_KEY` (backend) **unset** for local dev — the login screen is skipped and the app loads straight into the upload UI. Set them to enable login/register (e.g. in deployed environments).
+
 ## Input CSV format
 
 | column   | required | notes                             |
