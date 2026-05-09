@@ -12,7 +12,8 @@ interface Props {
   computeResult: ComputeResult | null
   isComputing: boolean
   computeError: string | null
-  onCompute: (benchmarkTickers: string[]) => void
+  benchmarkTickers: string[]
+  onBenchmarkChange: (tickers: string[]) => void
   onClearCache: () => void
 }
 
@@ -46,19 +47,22 @@ function RadioGroup<T extends string>({
   )
 }
 
-export default function ChartArea({ transactions, computeResult, isComputing, computeError, onCompute, onClearCache }: Props) {
+export default function ChartArea({ transactions, computeResult, isComputing, computeError, benchmarkTickers, onBenchmarkChange, onClearCache }: Props) {
   const [view, setView] = useState<View>('total')
   const [metric, setMetric] = useState<Metric>('portfolio_value')
   const [range, setRange] = useState<Range>('All')
   const [rollingWindow, setRollingWindow] = useState(60)
   const [benchmarkInput, setBenchmarkInput] = useState('')
 
-  const benchmarkTickers = benchmarkInput
-    .split(',')
-    .map((t) => t.trim().toUpperCase())
-    .filter(Boolean)
-
-  const handleCompute = () => onCompute(benchmarkTickers)
+  const handleBenchmarkChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target.value
+    setBenchmarkInput(input)
+    const tickers = input
+      .split(',')
+      .map((t) => t.trim().toUpperCase())
+      .filter(Boolean)
+    onBenchmarkChange(tickers)
+  }
 
   const rangeOptions: { value: Range; label: string }[] = [
     { value: 'All', label: 'All' },
@@ -122,30 +126,26 @@ export default function ChartArea({ transactions, computeResult, isComputing, co
           <p className="text-xs text-gray-500 uppercase tracking-wide">Benchmarks</p>
           <input
             value={benchmarkInput}
-            onChange={(e) => setBenchmarkInput(e.target.value)}
+            onChange={handleBenchmarkChange}
             placeholder="Yahoo Finance tickers, comma-separated — e.g. ^AXJO, ^GSPC"
             className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
           />
         </div>
 
-        <div className="flex gap-3">
-          <button
-            onClick={handleCompute}
-            disabled={isComputing || transactions.length === 0}
-            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium px-5 py-2 rounded-lg transition-colors"
-          >
-            {isComputing ? 'Computing…' : computeResult ? 'Recompute' : 'Compute'}
-          </button>
+        {isComputing && (
+          <div className="text-sm text-gray-400">
+            Computing portfolio…
+          </div>
+        )}
 
-          {computeResult && computeResult.failed_tickers.length > 0 && (
-            <button
-              onClick={() => { onClearCache(); handleCompute() }}
-              className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm"
-            >
-              Retry fetching prices
-            </button>
-          )}
-        </div>
+        {computeResult && computeResult.failed_tickers.length > 0 && (
+          <button
+            onClick={() => { onClearCache() }}
+            className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm"
+          >
+            Retry fetching prices
+          </button>
+        )}
 
         {computeError && (
           <p className="text-red-400 text-sm">{computeError}</p>
