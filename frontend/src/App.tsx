@@ -19,6 +19,7 @@ export default function App() {
   const [benchmarkTickers, setBenchmarkTickers] = useState<string[]>([])
   const computeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const computeRequestIdRef = useRef(0)
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleLogin = (tok: string, email: string) => {
     localStorage.setItem('auth_token', tok)
@@ -112,6 +113,47 @@ export default function App() {
       }
     }
   }, [transactions, benchmarkTickers])
+
+  // Load transactions on mount when token is available
+  useEffect(() => {
+    if (!token) return
+
+    const loadTransactions = async () => {
+      try {
+        const resp = await api.get('/api/transactions')
+        if (resp.data?.transactions && Array.isArray(resp.data.transactions)) {
+          setTransactions(resp.data.transactions)
+        }
+      } catch {
+        // Silently fail if endpoint not available (e.g., Supabase not configured)
+      }
+    }
+
+    loadTransactions()
+  }, [token])
+
+  // Debounced save transactions whenever they change
+  useEffect(() => {
+    if (!token || transactions.length === 0) return
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await api.put('/api/transactions', { transactions })
+      } catch {
+        // Silently fail if endpoint not available
+      }
+    }, 800)
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [transactions, token])
 
   useEffect(() => {
     if (!supabase) return

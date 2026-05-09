@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import io
+import os
 from pathlib import Path
 
 import pandas as pd
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, UploadFile, Depends, HTTPException, Header
 from pydantic import BaseModel
 
 from ..services.data import load_transactions
 from ..services.prices import fetch_prices_safely, clear_price_caches
 
 router = APIRouter()
+
+_SUPABASE_ENABLED = bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_ANON_KEY"))
 
 
 class PriceRequest(BaseModel):
@@ -88,3 +91,57 @@ async def fetch_prices(request: PriceRequest):
 async def clear_price_cache():
     clear_price_caches()
     return {"message": "Cache cleared"}
+
+
+async def get_user_id_from_token(authorization: str | None = Header(None)) -> str:
+    """Extract and validate Bearer token, return user_id. Raises 401/503 on failure."""
+    if not _SUPABASE_ENABLED:
+        raise HTTPException(status_code=503, detail="Transactions not configured (missing SUPABASE_URL/ANON_KEY)")
+
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+
+    token = authorization[7:]  # Remove "Bearer " prefix
+    from ..services.auth import get_client
+
+    try:
+        client = get_client()
+        user = client.auth.get_user(token)
+        return str(user.id)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(exc)}")
+
+
+class TransactionsRequest(BaseModel):
+    transactions: list[dict]
+
+
+@router.get("/transactions")
+async def get_transactions(user_id: str = Depends(get_user_id_from_token)):
+    """Fetch saved transactions for the authenticated user."""
+    from ..services.auth import get_client
+
+    try:
+        client = get_client()
+        resp = client.table("user_transactions").select("transactions").eq("user_id", user_id).execute()
+        if resp.data and len(resp.data) > 0:
+            return {"transactions": resp.data[0].get("transactions", [])}
+        return {"transactions": []}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch transactions: {str(exc)}")
+
+
+@router.put("/transactions")
+async def save_transactions(body: TransactionsRequest, user_id: str = Depends(get_user_id_from_token)):
+    """Save (upsert) transactions for the authenticated user."""
+    from ..services.auth import get_client
+
+    try:
+        client = get_client()
+        client.table("user_transactions").upsert(
+            {"user_id": user_id, "transactions": body.transactions},
+            on_conflict="user_id"
+        ).execute()
+        return {"message": "Transactions saved", "count": len(body.transactions)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to save transactions: {str(exc)}")
