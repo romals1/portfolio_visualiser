@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, UploadFile
 from pydantic import BaseModel
 
 from ..services.data import load_transactions
-from ..services.prices import fetch_prices_safely, clear_price_caches
+from ..services.prices import fetch_prices_safely, fetch_dividends_safely, clear_price_caches
 
 router = APIRouter()
 
@@ -42,8 +42,12 @@ async def parse_transactions(files: list[UploadFile] = File(...)):
 @router.post("/prices")
 async def fetch_prices(request: PriceRequest):
     """
-    Fetch prices for multiple tickers with optional FX conversion.
-    Returns {prices: {<ticker>: {dates: [], values: []}}, failed: []}
+    Fetch prices and dividends for multiple tickers.
+    Returns {prices: {<ticker>: {dates, values}}, dividends: {<ticker>: {dates, values}}, failed: []}
+
+    Prices are raw (unadjusted) close. Dividends are per-share amounts on ex-div
+    dates in the ticker's local currency. Dividend fetch failures are silent —
+    a ticker that genuinely pays no dividends gets an empty entry.
 
     Note: Returns are keyed by ticker symbol (e.g., "AAPL", "AUDUSD=X") for simplicity.
     For production with cross-exchange symbol collisions, consider keying by f"{exchange}:{ticker}".
@@ -52,6 +56,7 @@ async def fetch_prices(request: PriceRequest):
     end_dt = pd.to_datetime(request.end).normalize()
 
     prices_result: dict[str, dict[str, list]] = {}
+    dividends_result: dict[str, dict[str, list]] = {}
     failed: list[str] = []
 
     # Group tickers by exchange
@@ -66,7 +71,7 @@ async def fetch_prices(request: PriceRequest):
             by_exchange[exchange] = []
         by_exchange[exchange].append(ticker)
 
-    # Fetch prices per exchange
+    # Fetch prices and dividends per exchange
     for exchange, tickers in by_exchange.items():
         df, failed_for_exchange = fetch_prices_safely(tickers, exchange, start_dt, end_dt)
         failed.extend(f"{t} ({exchange})" for t in failed_for_exchange)
@@ -81,7 +86,22 @@ async def fetch_prices(request: PriceRequest):
                         "values": [float(v) for v in s.values],
                     }
 
-    return {"prices": prices_result, "failed": failed}
+        # Only fetch dividends for tickers whose prices fetched successfully —
+        # avoids wasted yfinance calls for invalid symbols. FX symbols never
+        # have dividends; this also skips them.
+        succeeded = [t for t in tickers if t not in failed_for_exchange]
+        div_map = fetch_dividends_safely(succeeded, exchange, start_dt, end_dt)
+        for ticker, series in div_map.items():
+            s = series.dropna()
+            if s.empty:
+                dividends_result[ticker] = {"dates": [], "values": []}
+                continue
+            dividends_result[ticker] = {
+                "dates": pd.DatetimeIndex(s.index).strftime("%Y-%m-%d").tolist(),
+                "values": [float(v) for v in s.values],
+            }
+
+    return {"prices": prices_result, "dividends": dividends_result, "failed": failed}
 
 
 @router.post("/portfolio/clear-cache")

@@ -14,6 +14,7 @@ interface PriceData {
 
 interface PricesResponse {
   prices: Record<string, PriceData>
+  dividends?: Record<string, PriceData>
   failed: string[]
 }
 
@@ -215,6 +216,7 @@ export async function computePortfolio(
 
   // Single batched price fetch for all tickers
   let allPricesData: Record<string, PriceData> = {}
+  let allDividendsData: Record<string, PriceData> = {}
   let allFailedTickers: string[] = []
   if (allTickersToFetch.size > 0) {
     try {
@@ -228,6 +230,7 @@ export async function computePortfolio(
         end: endStr,
       })
       allPricesData = resp.data.prices
+      allDividendsData = resp.data.dividends || {}
       allFailedTickers = resp.data.failed || []
     } catch (err) {
       allFailedTickers = Array.from(allTickersToFetch)
@@ -315,17 +318,53 @@ export async function computePortfolio(
         return tickers.reduce((sum, t) => sum + (symbolValues[t][i] || 0), 0)
       })
 
-      // Align all (BUY/SELL/DIV) cashflows to price dates
-      const symbolCashflows: Record<string, number[]> = {}
+      // Build per-symbol dividend cashflows from yfinance ex-div events
+      // weighted by shares held on each ex-div date. Authoritative source for
+      // dividends — user CSV DIV rows are ignored (Superhero/IB parsers strip
+      // them anyway, and yfinance gives consistent figures across formats).
+      const symbolDivCashflows: Record<string, number[]> = {}
+      for (const ticker of tickers) {
+        const divFeed = allDividendsData[ticker]
+        const events: { date: string; value: number }[] = []
+        if (divFeed) {
+          const dateToIdx = new Map(sortedDates.map((d, i) => [d, i]))
+          for (let k = 0; k < divFeed.dates.length; k++) {
+            const exDate = divFeed.dates[k]
+            const perShare = divFeed.values[k]
+            // align ex-div date to a price bar (next trading day if needed)
+            let idx = dateToIdx.get(exDate)
+            if (idx === undefined) {
+              idx = sortedDates.findIndex(d => d >= exDate)
+              if (idx < 0) continue
+            }
+            const shares = positions[ticker][idx] ?? 0
+            if (shares <= 0) continue
+            events.push({ date: sortedDates[idx], value: shares * perShare })
+          }
+        }
+        const aligned = alignToAxis(events, sortedDates)
+        symbolDivCashflows[ticker] = cumsum(aligned)
+      }
+
+      // Trade cashflows from BUY/SELL only — DIV CSV rows are ignored
+      const symbolTradeCashflows: Record<string, number[]> = {}
       for (const ticker of tickers) {
         const cfEvents = currencyTxns
-          .filter(t => t.ticker === ticker && ['BUY', 'SELL', 'DIV'].includes(t.action))
+          .filter(t => t.ticker === ticker && ['BUY', 'SELL'].includes(t.action))
           .map(t => ({
             date: t.date,
             value: t.net_amount,
           }))
         const aligned = alignToAxis(cfEvents, sortedDates)
-        symbolCashflows[ticker] = cumsum(aligned)
+        symbolTradeCashflows[ticker] = cumsum(aligned)
+      }
+
+      // Total per-symbol cashflow = trades + dividends received
+      const symbolCashflows: Record<string, number[]> = {}
+      for (const ticker of tickers) {
+        symbolCashflows[ticker] = symbolTradeCashflows[ticker].map(
+          (v, i) => v + (symbolDivCashflows[ticker][i] || 0)
+        )
       }
 
       const symbolNetReturns: Record<string, number[]> = {}
@@ -335,19 +374,6 @@ export async function computePortfolio(
 
       const totalCashflows = sortedDates.map((_, i) => tickers.reduce((sum, t) => sum + (symbolCashflows[t][i] || 0), 0))
       const netReturn = portfolioValue.map((pv, i) => pv + totalCashflows[i])
-
-      // Align DIV-only cashflows to price dates
-      const symbolDivCashflows: Record<string, number[]> = {}
-      for (const ticker of tickers) {
-        const divEvents = currencyTxns
-          .filter(t => t.ticker === ticker && t.action === 'DIV')
-          .map(t => ({
-            date: t.date,
-            value: t.net_amount,
-          }))
-        const aligned = alignToAxis(divEvents, sortedDates)
-        symbolDivCashflows[ticker] = cumsum(aligned)
-      }
 
       const symbolCapitalReturns: Record<string, number[]> = {}
       for (const ticker of tickers) {
