@@ -207,7 +207,7 @@ export async function computePortfolio(
   }
 
   const startDate = new Date(minTxnDate + 'T00:00:00Z')
-  const endDate = new Date(maxTxnDate + 'T00:00:00Z')
+  const endDate = new Date()
   endDate.setUTCDate(endDate.getUTCDate() + 1)
 
   const startStr = formatDate(startDate)
