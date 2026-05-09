@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { ComputeResult, Transaction } from '../types'
 import PortfolioChart from './PortfolioChart'
-import PortfolioStats from './PortfolioStats'
 
 type View = 'total' | 'by_symbol'
 type Metric = 'portfolio_value' | 'net_return' | 'rolling_return' | 'breakdown'
@@ -161,16 +160,13 @@ export default function ChartArea({ transactions, computeResult, isComputing, co
       </div>
 
       {computeResult && (
-        <>
-          <PortfolioStats result={computeResult} />
-          <PortfolioChart
-            result={computeResult}
-            view={view}
-            metric={metric}
-            range={range}
-            rollingWindow={rollingWindow}
-          />
-        </>
+        <PortfolioChart
+          result={computeResult}
+          view={view}
+          metric={metric}
+          range={range}
+          rollingWindow={rollingWindow}
+        />
       )}
     </div>
   )
