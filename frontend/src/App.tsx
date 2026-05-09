@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Auth from './components/Auth'
 import FileUpload from './components/FileUpload'
 import TransactionTable from './components/TransactionTable'
 import ChartArea from './components/ChartArea'
+import PortfolioStats from './components/PortfolioStats'
 import { Transaction, ComputeResult } from './types'
 import api from './api/client'
 import supabase from './api/supabase'
@@ -15,6 +16,7 @@ export default function App() {
   const [computeResult, setComputeResult] = useState<ComputeResult | null>(null)
   const [isComputing, setIsComputing] = useState(false)
   const [computeError, setComputeError] = useState<string | null>(null)
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   const handleLogin = (tok: string, email: string) => {
     localStorage.setItem('auth_token', tok)
@@ -72,6 +74,47 @@ export default function App() {
   const handleClearCache = async () => {
     try { await api.post('/api/portfolio/clear-cache') } catch { /* ignore */ }
   }
+
+  // Load transactions on mount when token is available
+  useEffect(() => {
+    if (!token) return
+
+    const loadTransactions = async () => {
+      try {
+        const resp = await api.get('/api/transactions')
+        if (resp.data?.transactions && Array.isArray(resp.data.transactions)) {
+          setTransactions(resp.data.transactions)
+        }
+      } catch {
+        // Silently fail if endpoint not available (e.g., Supabase not configured)
+      }
+    }
+
+    loadTransactions()
+  }, [token])
+
+  // Debounced save transactions whenever they change
+  useEffect(() => {
+    if (!token || transactions.length === 0) return
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await api.put('/api/transactions', { transactions })
+      } catch {
+        // Silently fail if endpoint not available
+      }
+    }, 800)
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [transactions, token])
 
   useEffect(() => {
     if (!supabase) return
@@ -132,6 +175,8 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+        {computeResult && <PortfolioStats result={computeResult} />}
+
         <FileUpload onTransactionsParsed={handleTransactionsParsed} onClear={handleClearTransactions} />
 
         {transactions.length > 0 && (
