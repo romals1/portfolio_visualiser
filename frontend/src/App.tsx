@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Auth from './components/Auth'
 import FileUpload from './components/FileUpload'
 import TransactionTable from './components/TransactionTable'
@@ -16,6 +16,8 @@ export default function App() {
   const [computeResult, setComputeResult] = useState<ComputeResult | null>(null)
   const [isComputing, setIsComputing] = useState(false)
   const [computeError, setComputeError] = useState<string | null>(null)
+  const [benchmarkTickers, setBenchmarkTickers] = useState<string[]>([])
+  const computeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const handleLogin = (tok: string, email: string) => {
     localStorage.setItem('auth_token', tok)
@@ -25,8 +27,16 @@ export default function App() {
   }
 
   const handleLogout = async () => {
-    try { await api.post('/api/auth/logout') } catch { /* ignore */ }
-    try { await supabase?.auth.signOut() } catch { /* ignore */ }
+    try {
+      await api.post('/api/auth/logout')
+    } catch {
+      /* ignore */
+    }
+    try {
+      await supabase?.auth.signOut()
+    } catch {
+      /* ignore */
+    }
     localStorage.removeItem('auth_token')
     localStorage.removeItem('user_email')
     setToken(null)
@@ -51,12 +61,12 @@ export default function App() {
     setComputeError(null)
   }
 
-  const handleCompute = async (benchmarkTickers: string[]) => {
-    if (transactions.length === 0) return
+  const performCompute = async (txns: Transaction[], benchmarks: string[]) => {
+    if (txns.length === 0) return
     setIsComputing(true)
     setComputeError(null)
     try {
-      const result = await computePortfolio(transactions, benchmarkTickers)
+      const result = await computePortfolio(txns, benchmarks)
       setComputeResult(result)
     } catch (err: unknown) {
       const detail =
@@ -71,8 +81,31 @@ export default function App() {
   }
 
   const handleClearCache = async () => {
-    try { await api.post('/api/portfolio/clear-cache') } catch { /* ignore */ }
+    try {
+      await api.post('/api/portfolio/clear-cache')
+    } catch {
+      /* ignore */
+    }
   }
+
+  // Auto-compute when transactions or benchmarks change
+  useEffect(() => {
+    if (transactions.length === 0) return
+
+    if (computeTimeoutRef.current) {
+      clearTimeout(computeTimeoutRef.current)
+    }
+
+    computeTimeoutRef.current = setTimeout(() => {
+      performCompute(transactions, benchmarkTickers)
+    }, 500)
+
+    return () => {
+      if (computeTimeoutRef.current) {
+        clearTimeout(computeTimeoutRef.current)
+      }
+    }
+  }, [transactions, benchmarkTickers])
 
   useEffect(() => {
     if (!supabase) return
@@ -89,9 +122,7 @@ export default function App() {
 
     checkSession()
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event: any, session: any) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: any, session: any) => {
       if (event === 'SIGNED_IN' && session?.user) {
         const userEmail = session.user.email || ''
         const accessToken = session.access_token
@@ -139,16 +170,14 @@ export default function App() {
 
         {transactions.length > 0 && (
           <>
-            <TransactionTable
-              transactions={transactions}
-              onChange={setTransactions}
-            />
+            <TransactionTable transactions={transactions} onChange={setTransactions} />
             <ChartArea
               transactions={transactions}
               computeResult={computeResult}
               isComputing={isComputing}
               computeError={computeError}
-              onCompute={handleCompute}
+              benchmarkTickers={benchmarkTickers}
+              onBenchmarkChange={setBenchmarkTickers}
               onClearCache={handleClearCache}
             />
           </>
