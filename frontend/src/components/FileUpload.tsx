@@ -74,7 +74,7 @@ export default function FileUpload({ onTransactionsParsed, onClear }: Props) {
         <input
           ref={inputRef}
           type="file"
-          accept=".csv"
+          accept=".csv,text/csv,text/plain,application/vnd.ms-excel,application/csv"
           multiple
           className="hidden"
           onChange={handleChange}
