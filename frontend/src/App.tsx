@@ -18,6 +18,7 @@ export default function App() {
   const [computeError, setComputeError] = useState<string | null>(null)
   const [benchmarkTickers, setBenchmarkTickers] = useState<string[]>([])
   const computeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const computeRequestIdRef = useRef(0)
 
   const handleLogin = (tok: string, email: string) => {
     localStorage.setItem('auth_token', tok)
@@ -63,12 +64,15 @@ export default function App() {
 
   const performCompute = async (txns: Transaction[], benchmarks: string[]) => {
     if (txns.length === 0) return
+    const requestId = ++computeRequestIdRef.current
     setIsComputing(true)
     setComputeError(null)
     try {
       const result = await computePortfolio(txns, benchmarks)
+      if (requestId !== computeRequestIdRef.current) return
       setComputeResult(result)
     } catch (err: unknown) {
+      if (requestId !== computeRequestIdRef.current) return
       const detail =
         (err as { response?: { data?: { detail?: string } }; message?: string })
           ?.response?.data?.detail ??
@@ -76,7 +80,9 @@ export default function App() {
         'Computation failed'
       setComputeError(detail)
     } finally {
-      setIsComputing(false)
+      if (requestId === computeRequestIdRef.current) {
+        setIsComputing(false)
+      }
     }
   }
 
