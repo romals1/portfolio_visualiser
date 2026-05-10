@@ -211,6 +211,8 @@ def save_prices(
 ) -> None:
     """Persist price rows and update coverage range."""
     try:
+        from psycopg2.extras import execute_values
+
         with _conn() as conn:
             if conn is None:
                 return
@@ -222,10 +224,12 @@ def save_prices(
                     if not pd.isna(val)
                 ]
                 if rows:
-                    cur.executemany(
+                    execute_values(
+                        cur,
                         "INSERT INTO ticker_prices (yahoo_symbol, price_date, close_price) "
-                        "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                        "VALUES %s ON CONFLICT DO NOTHING",
                         rows,
+                        page_size=1000,
                     )
             cur.close()
             _coalesce_ranges(conn, yahoo_symbol, 'price', range_start, range_end)
@@ -241,6 +245,8 @@ def save_dividends(
 ) -> None:
     """Persist dividend rows and update coverage range."""
     try:
+        from psycopg2.extras import execute_values
+
         with _conn() as conn:
             if conn is None:
                 return
@@ -252,10 +258,12 @@ def save_dividends(
                     if not pd.isna(val)
                 ]
                 if rows:
-                    cur.executemany(
+                    execute_values(
+                        cur,
                         "INSERT INTO ticker_dividends (yahoo_symbol, ex_date, amount) "
-                        "VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+                        "VALUES %s ON CONFLICT DO NOTHING",
                         rows,
+                        page_size=1000,
                     )
             cur.close()
             _coalesce_ranges(conn, yahoo_symbol, 'dividend', range_start, range_end)
