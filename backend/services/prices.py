@@ -98,6 +98,7 @@ def fetch_one_dividend_series(
 
 
 def _fetch_cached(yahoo_ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
+    from datetime import date as date_t
     key = ("PX", yahoo_ticker, str(start), str(end))
     now = time.time()
     with _CACHE_LOCK:
@@ -110,13 +111,53 @@ def _fetch_cached(yahoo_ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> 
             cached_time, series = cached
             if now - cached_time < _SUCCESS_TTL_S:
                 return series.copy()
-    series = fetch_one_price_series(yahoo_ticker, start=start, end=end)
+
+    from .price_cache_db import load_prices, save_prices, gaps as compute_gaps, db_available
+
+    req_start: date_t = start.date()
+    req_end: date_t = end.date()
+
+    if db_available():
+        db_series, covered = load_prices(yahoo_ticker, req_start, req_end)
+        missing = compute_gaps(req_start, req_end, covered)
+    else:
+        db_series = pd.Series(dtype="float64")
+        missing = [(req_start, req_end)]
+
+    fetched_parts: list[pd.Series] = []
+    for g_start, g_end in missing:
+        try:
+            s = fetch_one_price_series(
+                yahoo_ticker,
+                start=pd.Timestamp(g_start),
+                end=pd.Timestamp(g_end) + pd.Timedelta(days=1),
+            )
+            fetched_parts.append(s)
+            if db_available():
+                save_prices(yahoo_ticker, s, g_start, g_end)
+        except Exception as exc:
+            if db_series.empty and not fetched_parts:
+                with _CACHE_LOCK:
+                    _FAILURE_CACHE[key] = time.time()
+                raise
+            # partial data available from DB; skip this gap
+
+    all_parts = ([db_series] if not db_series.empty else []) + fetched_parts
+    if not all_parts:
+        with _CACHE_LOCK:
+            _FAILURE_CACHE[key] = time.time()
+        raise RuntimeError(f"No price data for {yahoo_ticker}")
+
+    combined = pd.concat(all_parts).sort_index()
+    combined = combined[~combined.index.duplicated(keep="last")]
+
     with _CACHE_LOCK:
-        _PRICE_CACHE[key] = (time.time(), series)
-    return series
+        _PRICE_CACHE[key] = (time.time(), combined)
+    return combined
 
 
 def _fetch_cached_dividends(yahoo_ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
+    from datetime import date as date_t
     key = ("DIV", yahoo_ticker, str(start), str(end))
     now = time.time()
     with _CACHE_LOCK:
@@ -129,12 +170,42 @@ def _fetch_cached_dividends(yahoo_ticker: str, start: pd.Timestamp, end: pd.Time
             cached_time, series = cached
             if now - cached_time < _SUCCESS_TTL_S:
                 return series.copy()
-    try:
-        series = fetch_one_dividend_series(yahoo_ticker, start=start, end=end)
-    except Exception:
-        with _CACHE_LOCK:
-            _FAILURE_CACHE[key] = time.time()
-        raise
+
+    from .price_cache_db import load_dividends, save_dividends, gaps as compute_gaps, db_available
+
+    req_start: date_t = start.date()
+    req_end: date_t = end.date()
+
+    if db_available():
+        db_series, covered = load_dividends(yahoo_ticker, req_start, req_end)
+        missing = compute_gaps(req_start, req_end, covered)
+    else:
+        db_series = pd.Series(dtype="float64")
+        missing = [(req_start, req_end)]
+
+    fetched_parts: list[pd.Series] = []
+    for g_start, g_end in missing:
+        try:
+            s = fetch_one_dividend_series(
+                yahoo_ticker,
+                start=pd.Timestamp(g_start),
+                end=pd.Timestamp(g_end) + pd.Timedelta(days=1),
+            )
+            fetched_parts.append(s)
+            if db_available():
+                save_dividends(yahoo_ticker, s, g_start, g_end)
+        except Exception:
+            with _CACHE_LOCK:
+                _FAILURE_CACHE[key] = time.time()
+            raise
+
+    all_parts = ([db_series] if not db_series.empty else []) + fetched_parts
+    if not all_parts:
+        series = pd.Series(dtype="float64", name=yahoo_ticker)
+    else:
+        series = pd.concat(all_parts).sort_index()
+        series = series[~series.index.duplicated(keep="last")]
+
     with _CACHE_LOCK:
         _PRICE_CACHE[key] = (time.time(), series)
     return series
