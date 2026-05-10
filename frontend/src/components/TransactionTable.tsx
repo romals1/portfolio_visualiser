@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Transaction } from '../types'
 
 interface Props {
@@ -43,8 +42,6 @@ function downloadCSV(txns: Transaction[]) {
 }
 
 export default function TransactionTable({ transactions, onChange }: Props) {
-  const [open, setOpen] = useState(false)
-
   const update = (i: number, field: keyof Transaction, value: string | number) => {
     onChange(
       transactions.map((r, idx) => {
@@ -63,26 +60,17 @@ export default function TransactionTable({ transactions, onChange }: Props) {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-sm font-medium text-gray-300">Transactions ({transactions.length} rows)</h2>
         <button
-          onClick={() => setOpen(!open)}
-          className="text-sm font-medium text-gray-300 hover:text-white flex items-center gap-2"
+          onClick={() => downloadCSV(transactions)}
+          className="text-xs text-blue-400 hover:text-blue-300"
         >
-          <span>{open ? '▾' : '▸'}</span>
-          Transactions ({transactions.length} rows)
+          Download CSV
         </button>
-        {open && (
-          <button
-            onClick={() => downloadCSV(transactions)}
-            className="text-xs text-blue-400 hover:text-blue-300"
-          >
-            Download CSV
-          </button>
-        )}
       </div>
 
-      {open && (
-        <div className="overflow-x-auto rounded-lg border border-gray-800">
+      <div className="overflow-x-auto rounded-lg border border-gray-800">
           <table className="min-w-full text-sm">
             <thead className="bg-gray-800 text-gray-400">
               <tr>
@@ -190,7 +178,6 @@ export default function TransactionTable({ transactions, onChange }: Props) {
             </button>
           </div>
         </div>
-      )}
     </div>
   )
 }
