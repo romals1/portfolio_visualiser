@@ -150,36 +150,59 @@ class TransactionsRequest(BaseModel):
 
 @router.get("/transactions")
 async def get_transactions(user: _AuthedUser = Depends(get_authed_user)):
-    """Fetch saved transactions for the authenticated user."""
+    """Fetch saved transactions for the authenticated user, ordered by date asc."""
     from ..services.auth import get_client
 
     try:
         client = get_client()
         client.postgrest.auth(user.token)
-        resp = client.table("user_transactions").select("transactions").eq("user_id", user.user_id).execute()
-        if resp.data and len(resp.data) > 0:
-            return {"transactions": resp.data[0].get("transactions", [])}
-        return {"transactions": []}
+        resp = (
+            client.table("user_transaction_rows")
+            .select("date,ticker,action,quantity,price,fees,exchange,portfolio")
+            .eq("user_id", user.user_id)
+            .order("date", desc=False)
+            .order("created_at", desc=False)
+            .execute()
+        )
+        rows = resp.data or []
+        for r in rows:
+            r["quantity"] = float(r["quantity"])
+            r["price"] = float(r["price"])
+            r["fees"] = float(r["fees"])
+        return {"transactions": rows}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to fetch transactions: {str(exc)}")
 
 
 @router.put("/transactions")
 async def save_transactions(body: TransactionsRequest, user: _AuthedUser = Depends(get_authed_user)):
-    """Save (upsert) transactions for the authenticated user."""
+    """Replace all transactions for the authenticated user (delete + insert)."""
     from ..services.auth import get_client
 
     try:
         client = get_client()
         client.postgrest.auth(user.token)
-        client.table("user_transactions").upsert(
-            {
-                "user_id": user.user_id,
-                "transactions": body.transactions,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            },
-            on_conflict="user_id",
-        ).execute()
+
+        # Delete all existing rows for this user (RLS scopes this to the caller)
+        client.table("user_transaction_rows").delete().eq("user_id", user.user_id).execute()
+
+        if body.transactions:
+            payload = [
+                {
+                    "user_id": user.user_id,
+                    "date": t["date"],
+                    "ticker": t["ticker"],
+                    "action": t["action"],
+                    "quantity": t["quantity"],
+                    "price": t["price"],
+                    "fees": t.get("fees", 0),
+                    "exchange": t["exchange"],
+                    "portfolio": t["portfolio"],
+                }
+                for t in body.transactions
+            ]
+            client.table("user_transaction_rows").insert(payload).execute()
+
         return {"message": "Transactions saved", "count": len(body.transactions)}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to save transactions: {str(exc)}")
