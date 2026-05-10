@@ -1,6 +1,8 @@
 -- Normalise transactions: one row per transaction in user_transaction_rows.
 -- Idempotent: safe to re-run.
 
+create extension if not exists "pgcrypto";
+
 create table if not exists user_transaction_rows (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
