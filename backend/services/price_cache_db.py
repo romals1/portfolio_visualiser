@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import date, timedelta
 from typing import Generator
@@ -14,6 +15,21 @@ logger = logging.getLogger(__name__)
 _POOL = None
 _POOL_LOCK = threading.Lock()
 _DB_DISABLED = False
+
+_SAVE_EXECUTOR: ThreadPoolExecutor | None = None
+_SAVE_EXECUTOR_LOCK = threading.Lock()
+
+
+def _get_save_executor() -> ThreadPoolExecutor:
+    global _SAVE_EXECUTOR
+    if _SAVE_EXECUTOR is not None:
+        return _SAVE_EXECUTOR
+    with _SAVE_EXECUTOR_LOCK:
+        if _SAVE_EXECUTOR is None:
+            _SAVE_EXECUTOR = ThreadPoolExecutor(
+                max_workers=2, thread_name_prefix="price-cache-save"
+            )
+        return _SAVE_EXECUTOR
 
 
 def _get_pool():
@@ -269,3 +285,23 @@ def save_dividends(
             _coalesce_ranges(conn, yahoo_symbol, 'dividend', range_start, range_end)
     except Exception as exc:
         logger.warning("save_dividends DB error: %s", exc)
+
+
+def save_prices_async(
+    yahoo_symbol: str,
+    series: pd.Series,
+    range_start: date,
+    range_end: date,
+) -> None:
+    """Fire-and-forget variant of save_prices; runs on a background thread."""
+    _get_save_executor().submit(save_prices, yahoo_symbol, series, range_start, range_end)
+
+
+def save_dividends_async(
+    yahoo_symbol: str,
+    series: pd.Series,
+    range_start: date,
+    range_end: date,
+) -> None:
+    """Fire-and-forget variant of save_dividends; runs on a background thread."""
+    _get_save_executor().submit(save_dividends, yahoo_symbol, series, range_start, range_end)
