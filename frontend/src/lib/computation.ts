@@ -161,7 +161,6 @@ export async function computePortfolio(
   // Collect all ticker/exchange pairs needed across all portfolios
   const allTickersToFetch = new Set<string>()
   const tickersByExchange: Record<string, Set<string>> = {}
-  let needsAUD = false
 
   for (const { txns: portfolioTxns } of portfolioMap.values()) {
     const currencyMap = new Map<string, TransactionWithFields[]>()
@@ -185,18 +184,7 @@ export async function computePortfolio(
         }
         tickersByExchange[exchange].add(txn.ticker)
       }
-      if (currency === 'AUD') {
-        needsAUD = true
-      }
     }
-  }
-
-  if (needsAUD) {
-    allTickersToFetch.add('US:AUDUSD=X')
-    if (!tickersByExchange['US']) {
-      tickersByExchange['US'] = new Set()
-    }
-    tickersByExchange['US'].add('AUDUSD=X')
   }
 
   // Calculate min/max transaction dates
@@ -246,8 +234,8 @@ export async function computePortfolio(
     const snrParts: Record<string, number[]>[] = []
     const scrParts: Record<string, number[]>[] = []
     const sdcParts: Record<string, number[]>[] = []
-    let dispCurrency = 'USD'
     let allSortedDates: string[] = []
+    let dispCurrency = 'USD'
 
     const currencyMap = new Map<string, TransactionWithFields[]>()
     for (const txn of portfolioTxns) {
@@ -383,74 +371,16 @@ export async function computePortfolio(
       const totalDivCashflows = sortedDates.map((_, i) => tickers.reduce((sum, t) => sum + (symbolDivCashflows[t][i] || 0), 0))
       const capitalReturn = netReturn.map((nr, i) => nr - totalDivCashflows[i])
 
-      let pvToAdd = portfolioValue
-      let nrToAdd = netReturn
-      let crToAdd = capitalReturn
-      let drToAdd = totalDivCashflows
-      let svToAdd = symbolValues
-      let snrToAdd = symbolNetReturns
-      let scrToAdd = symbolCapitalReturns
-      let sdcToAdd = symbolDivCashflows
+      dispCurrency = 'USD'
 
-      if (currency === 'AUD' && 'AUDUSD=X' in pricesData) {
-        const fxData = pricesData['AUDUSD=X']
-        let fxRate = forwardFillPrices(fxData.values, fxData.dates, sortedDates)
-
-        // Back-fill leading NaNs to prevent NaN propagation
-        let firstValidIndex = -1
-        for (let i = 0; i < fxRate.length; i++) {
-          if (!isNaN(fxRate[i])) {
-            firstValidIndex = i
-            break
-          }
-        }
-        if (firstValidIndex > 0) {
-          const firstValidValue = fxRate[firstValidIndex]
-          for (let i = 0; i < firstValidIndex; i++) {
-            fxRate[i] = firstValidValue
-          }
-        }
-
-        pvToAdd = portfolioValue.map((pv, i) => pv * fxRate[i])
-        nrToAdd = netReturn.map((nr, i) => nr * fxRate[i])
-        crToAdd = capitalReturn.map((cr, i) => cr * fxRate[i])
-        drToAdd = totalDivCashflows.map((dr, i) => dr * fxRate[i])
-
-        svToAdd = {}
-        for (const ticker of tickers) {
-          svToAdd[ticker] = symbolValues[ticker].map((sv, i) => sv * fxRate[i])
-        }
-
-        snrToAdd = {}
-        for (const ticker of tickers) {
-          snrToAdd[ticker] = symbolNetReturns[ticker].map((snr, i) => snr * fxRate[i])
-        }
-
-        scrToAdd = {}
-        for (const ticker of tickers) {
-          scrToAdd[ticker] = symbolCapitalReturns[ticker].map((scr, i) => scr * fxRate[i])
-        }
-
-        sdcToAdd = {}
-        for (const ticker of tickers) {
-          sdcToAdd[ticker] = symbolDivCashflows[ticker].map((sdc, i) => sdc * fxRate[i])
-        }
-
-        dispCurrency = 'USD'
-      } else if (currency === 'AUD') {
-        dispCurrency = 'AUD'
-      } else {
-        dispCurrency = 'USD'
-      }
-
-      pvParts.push(pvToAdd)
-      nrParts.push(nrToAdd)
-      crParts.push(crToAdd)
-      drParts.push(drToAdd)
-      svParts.push(svToAdd)
-      snrParts.push(snrToAdd)
-      scrParts.push(scrToAdd)
-      sdcParts.push(sdcToAdd)
+      pvParts.push(portfolioValue)
+      nrParts.push(netReturn)
+      crParts.push(capitalReturn)
+      drParts.push(totalDivCashflows)
+      svParts.push(symbolValues)
+      snrParts.push(symbolNetReturns)
+      scrParts.push(symbolCapitalReturns)
+      sdcParts.push(symbolDivCashflows)
       allSortedDates = sortedDates
     }
 
