@@ -112,7 +112,7 @@ def _fetch_cached(yahoo_ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> 
             if now - cached_time < _SUCCESS_TTL_S:
                 return series.copy()
 
-    from .price_cache_db import load_prices, save_prices, gaps as compute_gaps, db_available
+    from .price_cache_db import load_prices, save_prices_async, gaps as compute_gaps, db_available
 
     req_start: date_t = start.date()
     req_end: date_t = end.date()
@@ -134,7 +134,7 @@ def _fetch_cached(yahoo_ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> 
             )
             fetched_parts.append(s)
             if db_available():
-                save_prices(yahoo_ticker, s, g_start, g_end)
+                save_prices_async(yahoo_ticker, s, g_start, g_end)
         except Exception:
             if db_series.empty and not fetched_parts:
                 with _CACHE_LOCK:
@@ -171,7 +171,7 @@ def _fetch_cached_dividends(yahoo_ticker: str, start: pd.Timestamp, end: pd.Time
             if now - cached_time < _SUCCESS_TTL_S:
                 return series.copy()
 
-    from .price_cache_db import load_dividends, save_dividends, gaps as compute_gaps, db_available
+    from .price_cache_db import load_dividends, save_dividends_async, gaps as compute_gaps, db_available
 
     req_start: date_t = start.date()
     req_end: date_t = end.date()
@@ -193,7 +193,7 @@ def _fetch_cached_dividends(yahoo_ticker: str, start: pd.Timestamp, end: pd.Time
             )
             fetched_parts.append(s)
             if db_available():
-                save_dividends(yahoo_ticker, s, g_start, g_end)
+                save_dividends_async(yahoo_ticker, s, g_start, g_end)
         except Exception:
             with _CACHE_LOCK:
                 _FAILURE_CACHE[key] = time.time()
