@@ -38,6 +38,11 @@ async def parse_transactions(files: list[UploadFile] = File(...)):
         return {"transactions": []}
 
     combined = pd.concat(all_frames, ignore_index=True).sort_values("date").reset_index(drop=True)
+    from ..services.data import convert_aud_to_usd
+    try:
+        combined = convert_aud_to_usd(combined)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
     combined["date"] = combined["date"].dt.strftime("%Y-%m-%d")
     cols = ["date", "ticker", "action", "quantity", "price", "fees", "exchange", "portfolio"]
     result = combined.reindex(columns=cols).fillna({"fees": 0.0}).to_dict(orient="records")
@@ -105,6 +110,29 @@ async def fetch_prices(request: PriceRequest):
                 "dates": pd.DatetimeIndex(s.index).strftime("%Y-%m-%d").tolist(),
                 "values": [float(v) for v in s.values],
             }
+
+    # Convert ASX (AUD) prices and dividends to USD
+    asx_tickers = set(by_exchange.get("ASX", []))
+    if asx_tickers:
+        from ..services.prices import fetch_audusd_rates
+        fx_series = fetch_audusd_rates(start_dt, end_dt)
+        if not fx_series.empty:
+            fx_map = {d.strftime("%Y-%m-%d"): float(v) for d, v in fx_series.items() if not pd.isna(v)}
+            for ticker in asx_tickers:
+                if ticker in prices_result:
+                    pd_data = prices_result[ticker]
+                    prices_result[ticker]["values"] = [
+                        v * fx_map.get(d, 1.0)
+                        for d, v in zip(pd_data["dates"], pd_data["values"])
+                    ]
+                if ticker in dividends_result:
+                    div_data = dividends_result[ticker]
+                    dividends_result[ticker]["values"] = [
+                        v * fx_map.get(d, 1.0)
+                        for d, v in zip(div_data["dates"], div_data["values"])
+                    ]
+        else:
+            failed.append("AUDUSD=X (FX conversion unavailable)")
 
     return {"prices": prices_result, "dividends": dividends_result, "failed": failed}
 

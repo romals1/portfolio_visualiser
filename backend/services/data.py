@@ -167,3 +167,46 @@ def load_transactions(source, exchange: str | None = None) -> pd.DataFrame:
     if fmt == "manual":
         return parse_manual(source)
     return parse_superhero(source, exchange)
+
+
+def convert_aud_to_usd(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert price, fees, net_amount from AUD to USD for ASX rows.
+
+    Uses historical AUDUSD=X rates from yfinance. Raises RuntimeError if
+    FX data cannot be fetched for the required date range.
+    """
+    from .prices import fetch_audusd_rates
+
+    mask = df["currency"] == "AUD"
+    if not mask.any():
+        return df
+
+    aud_dates = df.loc[mask, "date"]
+    min_date = aud_dates.min()
+    max_date = aud_dates.max()
+
+    fx_series = fetch_audusd_rates(
+        start=pd.Timestamp(min_date).normalize(),
+        end=pd.Timestamp(max_date).normalize() + pd.Timedelta(days=1),
+    )
+
+    if fx_series.empty:
+        raise RuntimeError(
+            f"Could not fetch AUDUSD=X for date range {min_date.date()}..{max_date.date()}"
+        )
+
+    # Build a date-string → rate map with forward fill then back fill
+    all_dates = aud_dates.dt.strftime("%Y-%m-%d").unique()
+    date_index = pd.DatetimeIndex(sorted(set(fx_series.index.tolist() + [pd.Timestamp(d) for d in all_dates])))
+    fx_aligned = fx_series.reindex(date_index).ffill().bfill()
+    rate_map = {d.strftime("%Y-%m-%d"): float(v) for d, v in fx_aligned.items() if not pd.isna(v)}
+
+    df = df.copy()
+    for col in ["price", "fees", "net_amount"]:
+        if col in df.columns:
+            df.loc[mask, col] = df.loc[mask].apply(
+                lambda r, c=col: r[c] * rate_map.get(r["date"].strftime("%Y-%m-%d"), 1.0),
+                axis=1,
+            )
+    df.loc[mask, "currency"] = "USD"
+    return df

@@ -181,6 +181,17 @@ def fetch_dividends_safely(
     return out
 
 
+def fetch_audusd_rates(start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
+    """Fetch AUDUSD=X daily close prices over [start, end). Returns tz-naive Series.
+
+    Returns empty Series on failure. Reuses the existing price cache.
+    """
+    df, failed = fetch_prices_safely(["AUDUSD=X"], "US", start, end)
+    if df.empty or "AUDUSD=X" not in df.columns:
+        return pd.Series(dtype="float64")
+    return df["AUDUSD=X"].dropna()
+
+
 def clear_price_caches() -> None:
     with _CACHE_LOCK:
         _PRICE_CACHE.clear()
