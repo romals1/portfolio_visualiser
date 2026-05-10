@@ -4,6 +4,7 @@ import FileUpload from './components/FileUpload'
 import TransactionTable from './components/TransactionTable'
 import ChartArea from './components/ChartArea'
 import PortfolioStats from './components/PortfolioStats'
+import Tabs from './components/Tabs'
 import { Transaction, ComputeResult } from './types'
 import api from './api/client'
 import supabase from './api/supabase'
@@ -19,6 +20,7 @@ export default function App() {
   const [isComputing, setIsComputing] = useState(false)
   const [computeError, setComputeError] = useState<string | null>(null)
   const [benchmarkTickers, setBenchmarkTickers] = useState<string[]>([])
+  const [activeTab, setActiveTab] = useState<'transactions' | 'chart'>('transactions')
   const computeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const computeRequestIdRef = useRef(0)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -271,18 +273,30 @@ export default function App() {
         <FileUpload onTransactionsParsed={handleTransactionsParsed} onClear={handleClearTransactions} />
 
         {transactions.length > 0 && (
-          <>
-            <TransactionTable transactions={transactions} onChange={setTransactions} />
-            <ChartArea
-              transactions={transactions}
-              computeResult={computeResult}
-              isComputing={isComputing}
-              computeError={computeError}
-              benchmarkTickers={benchmarkTickers}
-              onBenchmarkChange={setBenchmarkTickers}
-              onClearCache={handleClearCache}
+          <div className="space-y-4">
+            <Tabs
+              tabs={[
+                { id: 'transactions', label: 'Transactions' },
+                { id: 'chart', label: 'Chart' },
+              ]}
+              active={activeTab}
+              onChange={(id) => setActiveTab(id as 'transactions' | 'chart')}
             />
-          </>
+            <div role="tabpanel" className={activeTab === 'transactions' ? '' : 'hidden'}>
+              <TransactionTable transactions={transactions} onChange={setTransactions} />
+            </div>
+            <div role="tabpanel" className={activeTab === 'chart' ? '' : 'hidden'}>
+              <ChartArea
+                transactions={transactions}
+                computeResult={computeResult}
+                isComputing={isComputing}
+                computeError={computeError}
+                benchmarkTickers={benchmarkTickers}
+                onBenchmarkChange={setBenchmarkTickers}
+                onClearCache={handleClearCache}
+              />
+            </div>
+          </div>
         )}
       </main>
     </div>
