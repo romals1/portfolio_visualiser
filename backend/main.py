@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .routers import auth, portfolio
+from .services.migrations import run_migrations
 
-app = FastAPI(title="Portfolio Returns API", version="2.0.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    run_migrations()
+    yield
+
+
+app = FastAPI(title="Portfolio Returns API", version="2.0.0", lifespan=lifespan)
 
 allowed_origins = [
     "http://localhost:5173",

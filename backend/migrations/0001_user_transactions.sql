@@ -6,7 +6,10 @@ create table if not exists user_transactions (
 
 alter table user_transactions enable row level security;
 
-create policy "user_transactions_owner" on user_transactions
-  for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
+do $$ begin
+  create policy "user_transactions_owner" on user_transactions
+    for all
+    using (auth.uid() = user_id)
+    with check (auth.uid() = user_id);
+exception when duplicate_object then null;
+end $$;

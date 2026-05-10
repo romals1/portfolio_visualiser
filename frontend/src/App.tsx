@@ -187,6 +187,26 @@ export default function App() {
     }
   }, [transactions, token])
 
+  // Flush pending save immediately on tab close so no edits are lost
+  useEffect(() => {
+    if (!token) return
+    const handleBeforeUnload = () => {
+      if (!hasLoadedRef.current) return
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+        saveTimeoutRef.current = null
+      }
+      fetch('/api/transactions', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ transactions }),
+        keepalive: true,
+      }).catch(() => {})
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [token, transactions])
+
   useEffect(() => {
     if (!supabase) return
 

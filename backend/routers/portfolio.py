@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import os
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -113,24 +115,29 @@ async def clear_price_cache():
     return {"message": "Cache cleared"}
 
 
-async def get_user_id_from_token(authorization: str | None = Header(None)) -> str:
-    """Extract and validate Bearer token, return user_id. Raises 401/503 on failure."""
+@dataclass
+class _AuthedUser:
+    user_id: str
+    token: str
+
+
+async def get_authed_user(authorization: str | None = Header(None)) -> _AuthedUser:
+    """Validate Bearer token, return user_id + raw token for PostgREST RLS forwarding."""
     if not _SUPABASE_ENABLED:
         raise HTTPException(status_code=503, detail="Transactions not configured (missing SUPABASE_URL/ANON_KEY)")
 
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
-    token = authorization[7:]  # Remove "Bearer " prefix
+    token = authorization[7:]
     from ..services.auth import get_client
 
     try:
         client = get_client()
         resp = client.auth.get_user(token)
-        # supabase-py returns a UserResponse object: resp.user.id is the UUID
         if not resp or not getattr(resp, "user", None) or not getattr(resp.user, "id", None):
             raise HTTPException(status_code=401, detail="Invalid token: no user")
-        return str(resp.user.id)
+        return _AuthedUser(user_id=str(resp.user.id), token=token)
     except HTTPException:
         raise
     except Exception as exc:
@@ -142,13 +149,14 @@ class TransactionsRequest(BaseModel):
 
 
 @router.get("/transactions")
-async def get_transactions(user_id: str = Depends(get_user_id_from_token)):
+async def get_transactions(user: _AuthedUser = Depends(get_authed_user)):
     """Fetch saved transactions for the authenticated user."""
     from ..services.auth import get_client
 
     try:
         client = get_client()
-        resp = client.table("user_transactions").select("transactions").eq("user_id", user_id).execute()
+        client.postgrest.auth(user.token)
+        resp = client.table("user_transactions").select("transactions").eq("user_id", user.user_id).execute()
         if resp.data and len(resp.data) > 0:
             return {"transactions": resp.data[0].get("transactions", [])}
         return {"transactions": []}
@@ -157,15 +165,20 @@ async def get_transactions(user_id: str = Depends(get_user_id_from_token)):
 
 
 @router.put("/transactions")
-async def save_transactions(body: TransactionsRequest, user_id: str = Depends(get_user_id_from_token)):
+async def save_transactions(body: TransactionsRequest, user: _AuthedUser = Depends(get_authed_user)):
     """Save (upsert) transactions for the authenticated user."""
     from ..services.auth import get_client
 
     try:
         client = get_client()
+        client.postgrest.auth(user.token)
         client.table("user_transactions").upsert(
-            {"user_id": user_id, "transactions": body.transactions},
-            on_conflict="user_id"
+            {
+                "user_id": user.user_id,
+                "transactions": body.transactions,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            on_conflict="user_id",
         ).execute()
         return {"message": "Transactions saved", "count": len(body.transactions)}
     except Exception as exc:
