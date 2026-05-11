@@ -11,7 +11,7 @@ from fastapi import APIRouter, File, UploadFile, Depends, HTTPException, Header
 from pydantic import BaseModel
 
 from ..services.data import load_transactions
-from ..services.prices import fetch_prices_safely, fetch_dividends_safely, clear_price_caches
+from ..services.prices import fetch_prices_and_dividends_safely, clear_price_caches
 
 router = APIRouter()
 
@@ -62,51 +62,48 @@ async def fetch_prices(request: PriceRequest):
     start_dt = pd.to_datetime(request.start).normalize()
     end_dt = pd.to_datetime(request.end).normalize()
 
-    prices_result: dict[str, dict[str, list]] = {}
-    dividends_result: dict[str, dict[str, list]] = {}
-    failed: list[str] = []
-
-    # Group tickers by exchange
-    by_exchange: dict[str, list[str]] = {}
-
-    for item in request.tickers:
-        ticker = item.get("ticker", "").upper().strip()
-        exchange = item.get("exchange", "US").upper().strip()
+    # Dedup the request preserving each ticker's exchange. Bad inputs are dropped.
+    items: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    exchange_by_ticker: dict[str, str] = {}
+    for entry in request.tickers:
+        ticker = entry.get("ticker", "").upper().strip()
+        exchange = entry.get("exchange", "US").upper().strip()
         if not ticker:
             continue
-        if exchange not in by_exchange:
-            by_exchange[exchange] = []
-        by_exchange[exchange].append(ticker)
+        key = (ticker, exchange)
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append(key)
+        exchange_by_ticker[ticker] = exchange
 
-    # Fetch prices and dividends per exchange
-    for exchange, tickers in by_exchange.items():
-        df, failed_for_exchange = fetch_prices_safely(tickers, exchange, start_dt, end_dt)
-        failed.extend(f"{t} ({exchange})" for t in failed_for_exchange)
+    prices_map, dividends_map, failed_tickers = fetch_prices_and_dividends_safely(
+        items, start_dt, end_dt
+    )
 
-        if not df.empty:
-            for col in df.columns:
-                # col is the original ticker name (before yahoo_symbol conversion)
-                s = df[col].dropna()
-                if not s.empty:
-                    prices_result[col] = {
-                        "dates": s.index.strftime("%Y-%m-%d").tolist(),
-                        "values": [float(v) for v in s.values],
-                    }
+    prices_result: dict[str, dict[str, list]] = {}
+    for ticker, series in prices_map.items():
+        s = series.dropna()
+        if s.empty:
+            continue
+        prices_result[ticker] = {
+            "dates": pd.DatetimeIndex(s.index).strftime("%Y-%m-%d").tolist(),
+            "values": [float(v) for v in s.values],
+        }
 
-        # Only fetch dividends for tickers whose prices fetched successfully —
-        # avoids wasted yfinance calls for invalid symbols. FX symbols never
-        # have dividends; this also skips them.
-        succeeded = [t for t in tickers if t not in failed_for_exchange]
-        div_map = fetch_dividends_safely(succeeded, exchange, start_dt, end_dt)
-        for ticker, series in div_map.items():
-            s = series.dropna()
-            if s.empty:
-                dividends_result[ticker] = {"dates": [], "values": []}
-                continue
-            dividends_result[ticker] = {
-                "dates": pd.DatetimeIndex(s.index).strftime("%Y-%m-%d").tolist(),
-                "values": [float(v) for v in s.values],
-            }
+    dividends_result: dict[str, dict[str, list]] = {}
+    for ticker, series in dividends_map.items():
+        s = series.dropna()
+        if s.empty:
+            dividends_result[ticker] = {"dates": [], "values": []}
+            continue
+        dividends_result[ticker] = {
+            "dates": pd.DatetimeIndex(s.index).strftime("%Y-%m-%d").tolist(),
+            "values": [float(v) for v in s.values],
+        }
+
+    failed = [f"{t} ({exchange_by_ticker.get(t, 'US')})" for t in failed_tickers]
 
     return {"prices": prices_result, "dividends": dividends_result, "failed": failed}
 

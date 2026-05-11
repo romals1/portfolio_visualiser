@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import date as date_t
 from threading import Lock
 
 import pandas as pd
@@ -17,239 +18,289 @@ def yahoo_symbol(ticker: str, exchange: str) -> str:
     return f"{ticker}.AX" if exchange == "ASX" else ticker
 
 
-def fetch_one_price_series(
-    yahoo_ticker: str,
-    start: pd.Timestamp | str | None = None,
-    end: pd.Timestamp | str | None = None,
-) -> pd.Series:
-    """Fetch raw (unadjusted) close prices for a single Yahoo ticker.
+def _fetch_batch_from_yfinance(
+    yahoo_symbols: list[str],
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> tuple[dict[str, pd.Series], dict[str, pd.Series], list[str]]:
+    """Fetch raw close prices and dividends for many Yahoo tickers in one HTTP call.
 
-    Returns a tz-naive, daily-normalized Series. Raises RuntimeError if no data
-    is returned (empty response, missing Close column, or all-NaN). end is
-    exclusive in yfinance; callers should pass last_date + 1 day.
+    Uses yf.download(actions=True) to retrieve both prices and dividend events in a
+    single batched request. Returns (prices_by_symbol, dividends_by_symbol, failed),
+    where failed contains symbols with no usable price data. end is exclusive (yfinance
+    semantics) — callers pass last_date + 1 day.
 
-    auto_adjust=False so historical close prices reflect actual market value.
-    Dividends are fetched separately via fetch_one_dividend_series and added as
-    explicit cashflows in the return calculation; combining unadjusted prices
-    with explicit dividend cashflows avoids the double-count that would result
-    from using auto_adjust=True (which folds dividends into the price series).
+    auto_adjust=False so historical close reflects actual market value; dividends are
+    surfaced as separate events to be added as explicit cashflows downstream (avoids
+    the double-count of auto_adjust=True folding dividends into the price).
     """
-    if start is not None:
-        start = pd.to_datetime(start).tz_localize(None).normalize()
-    if end is not None:
-        end = pd.to_datetime(end).tz_localize(None).normalize()
+    if not yahoo_symbols:
+        return {}, {}, []
+
+    start = pd.to_datetime(start).tz_localize(None).normalize()
+    end = pd.to_datetime(end).tz_localize(None).normalize()
 
     df = yf.download(
-        tickers=yahoo_ticker,
+        tickers=yahoo_symbols,
         start=start,
         end=end,
         auto_adjust=False,
+        actions=True,
         progress=False,
+        group_by="column",
+        threads=True,
     )
-    if df.empty:
-        raise RuntimeError(f"No price data returned for {yahoo_ticker}")
 
-    if isinstance(df.columns, pd.MultiIndex):
-        # yfinance returns MultiIndex (Field, Ticker) with Field on level 0.
-        if "Close" not in df.columns.get_level_values(0):
-            raise RuntimeError(f"No Close column for {yahoo_ticker}")
-        sub = df["Close"]
-        s = sub.iloc[:, 0] if isinstance(sub, pd.DataFrame) else sub
-    else:
-        if "Close" not in df.columns:
-            raise RuntimeError(f"No Close column for {yahoo_ticker}")
-        s = df["Close"]
+    if df is None or df.empty:
+        return {}, {}, list(yahoo_symbols)
 
-    s.index = pd.to_datetime(s.index).tz_localize(None).normalize()
-    s = s.dropna()
-    if s.empty:
-        raise RuntimeError(f"All-NaN price data for {yahoo_ticker}")
-    s.name = yahoo_ticker
-    return s
+    # With a list input, yf.download returns a MultiIndex (Field, Ticker).
+    if not isinstance(df.columns, pd.MultiIndex):
+        # Defensive: coerce to MultiIndex for the single-ticker path.
+        df.columns = pd.MultiIndex.from_product([df.columns, [yahoo_symbols[0]]])
 
+    df.index = pd.to_datetime(df.index).tz_localize(None).normalize()
 
-def fetch_one_dividend_series(
-    yahoo_ticker: str,
-    start: pd.Timestamp | str | None = None,
-    end: pd.Timestamp | str | None = None,
-) -> pd.Series:
-    """Fetch per-share dividend events for a single Yahoo ticker.
+    close_df = df["Close"] if "Close" in df.columns.get_level_values(0) else pd.DataFrame()
+    div_df = df["Dividends"] if "Dividends" in df.columns.get_level_values(0) else pd.DataFrame()
 
-    Returns a tz-naive Series indexed by ex-dividend date with per-share dividend
-    amount (in the ticker's local currency) as values. Returns an empty Series
-    if the ticker pays no dividends in the window — this is not an error.
-    """
-    if start is not None:
-        start = pd.to_datetime(start).tz_localize(None).normalize()
-    if end is not None:
-        end = pd.to_datetime(end).tz_localize(None).normalize()
-
-    s = yf.Ticker(yahoo_ticker).dividends
-    if s is None or s.empty:
-        return pd.Series(dtype="float64", name=yahoo_ticker, index=pd.DatetimeIndex([]))
-    s.index = pd.to_datetime(s.index).tz_localize(None).normalize()
-    if start is not None:
-        s = s[s.index >= start]
-    if end is not None:
-        # match price end semantics (exclusive)
-        s = s[s.index < end]
-    s.name = yahoo_ticker
-    return s
-
-
-def _fetch_cached(yahoo_ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
-    from datetime import date as date_t
-    key = ("PX", yahoo_ticker, str(start), str(end))
-    now = time.time()
-    with _CACHE_LOCK:
-        last_fail = _FAILURE_CACHE.get(key)
-        if last_fail is not None and (now - last_fail) < _FAILURE_BACKOFF_S:
-            remaining = int(_FAILURE_BACKOFF_S - (now - last_fail))
-            raise RuntimeError(f"{yahoo_ticker}: backing off (retry in {remaining}s)")
-        cached = _PRICE_CACHE.get(key)
-        if cached is not None:
-            cached_time, series = cached
-            if now - cached_time < _SUCCESS_TTL_S:
-                return series.copy()
-
-    from .price_cache_db import load_prices, save_prices_async, gaps as compute_gaps, db_available
-
-    req_start: date_t = start.date()
-    req_end: date_t = end.date()
-
-    if db_available():
-        db_series, covered = load_prices(yahoo_ticker, req_start, req_end)
-        missing = compute_gaps(req_start, req_end, covered)
-    else:
-        db_series = pd.Series(dtype="float64")
-        missing = [(req_start, req_end)]
-
-    fetched_parts: list[pd.Series] = []
-    for g_start, g_end in missing:
-        try:
-            s = fetch_one_price_series(
-                yahoo_ticker,
-                start=pd.Timestamp(g_start),
-                end=pd.Timestamp(g_end) + pd.Timedelta(days=1),
-            )
-            fetched_parts.append(s)
-            if db_available():
-                save_prices_async(yahoo_ticker, s, g_start, g_end)
-        except Exception:
-            if db_series.empty and not fetched_parts:
-                with _CACHE_LOCK:
-                    _FAILURE_CACHE[key] = time.time()
-                raise
-            # partial data available from DB; skip this gap
-
-    all_parts = ([db_series] if not db_series.empty else []) + fetched_parts
-    if not all_parts:
-        with _CACHE_LOCK:
-            _FAILURE_CACHE[key] = time.time()
-        raise RuntimeError(f"No price data for {yahoo_ticker}")
-
-    combined = pd.concat(all_parts).sort_index()
-    combined = combined[~combined.index.duplicated(keep="last")]
-
-    with _CACHE_LOCK:
-        _PRICE_CACHE[key] = (time.time(), combined)
-    return combined
-
-
-def _fetch_cached_dividends(yahoo_ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.Series:
-    from datetime import date as date_t
-    key = ("DIV", yahoo_ticker, str(start), str(end))
-    now = time.time()
-    with _CACHE_LOCK:
-        last_fail = _FAILURE_CACHE.get(key)
-        if last_fail is not None and (now - last_fail) < _FAILURE_BACKOFF_S:
-            remaining = int(_FAILURE_BACKOFF_S - (now - last_fail))
-            raise RuntimeError(f"{yahoo_ticker}: dividend backing off (retry in {remaining}s)")
-        cached = _PRICE_CACHE.get(key)
-        if cached is not None:
-            cached_time, series = cached
-            if now - cached_time < _SUCCESS_TTL_S:
-                return series.copy()
-
-    from .price_cache_db import load_dividends, save_dividends_async, gaps as compute_gaps, db_available
-
-    req_start: date_t = start.date()
-    req_end: date_t = end.date()
-
-    if db_available():
-        db_series, covered = load_dividends(yahoo_ticker, req_start, req_end)
-        missing = compute_gaps(req_start, req_end, covered)
-    else:
-        db_series = pd.Series(dtype="float64")
-        missing = [(req_start, req_end)]
-
-    fetched_parts: list[pd.Series] = []
-    for g_start, g_end in missing:
-        try:
-            s = fetch_one_dividend_series(
-                yahoo_ticker,
-                start=pd.Timestamp(g_start),
-                end=pd.Timestamp(g_end) + pd.Timedelta(days=1),
-            )
-            fetched_parts.append(s)
-            if db_available():
-                save_dividends_async(yahoo_ticker, s, g_start, g_end)
-        except Exception:
-            with _CACHE_LOCK:
-                _FAILURE_CACHE[key] = time.time()
-            raise
-
-    all_parts = ([db_series] if not db_series.empty else []) + fetched_parts
-    if not all_parts:
-        series = pd.Series(dtype="float64", name=yahoo_ticker)
-    else:
-        series = pd.concat(all_parts).sort_index()
-        series = series[~series.index.duplicated(keep="last")]
-
-    with _CACHE_LOCK:
-        _PRICE_CACHE[key] = (time.time(), series)
-    return series
-
-
-def fetch_prices_safely(
-    tickers: list[str],
-    exchange: str,
-    start: pd.Timestamp,
-    end: pd.Timestamp,
-) -> tuple[pd.DataFrame, list[str]]:
-    series_map: dict[str, pd.Series] = {}
+    prices: dict[str, pd.Series] = {}
+    divs: dict[str, pd.Series] = {}
     failed: list[str] = []
-    for t in tickers:
-        ys = yahoo_symbol(t, exchange)
-        try:
-            series_map[t] = _fetch_cached(ys, start, end)
-        except Exception:
-            failed.append(t)
-    if not series_map:
-        return pd.DataFrame(), failed
-    df = pd.concat(series_map, axis=1).sort_index().dropna(how="all")
-    return df, failed
+
+    for ys in yahoo_symbols:
+        close = close_df[ys].dropna() if ys in close_df.columns else pd.Series(dtype="float64")
+        if close.empty:
+            failed.append(ys)
+        else:
+            close.name = ys
+            prices[ys] = close
+
+        if ys in div_df.columns:
+            d = div_df[ys].dropna()
+            d = d[d > 0]
+        else:
+            d = pd.Series(dtype="float64")
+        d.name = ys
+        divs[ys] = d  # may be empty — valid result for tickers that paid no dividends
+
+    return prices, divs, failed
 
 
-def fetch_dividends_safely(
-    tickers: list[str],
-    exchange: str,
+def fetch_prices_and_dividends_safely(
+    items: list[tuple[str, str]],
     start: pd.Timestamp,
     end: pd.Timestamp,
-) -> dict[str, pd.Series]:
-    """Fetch per-share dividend series for each ticker.
+) -> tuple[dict[str, pd.Series], dict[str, pd.Series], list[str]]:
+    """Batched fetch of prices + dividends across tickers (possibly mixed exchanges).
 
-    Returns {ticker: Series}. Empty Series for tickers with no dividends or
-    on fetch failure (failures are silent — dividends are best-effort).
+    items: list of (ticker, exchange) tuples; exchange is "ASX" or "US".
+
+    Pipeline:
+      1. In-memory cache check for each symbol (separate keys for price/div).
+      2. Single batched DB load for all symbols missing from the in-memory cache.
+      3. Compute per-symbol gaps; collect symbols that still need to hit yfinance.
+      4. One yf.download call with actions=True over the union of gap windows.
+      5. Async-persist new data per symbol; refresh in-memory cache.
+
+    Returns ({original_ticker: prices Series}, {original_ticker: dividends Series},
+    failed_original_tickers). Dividend failures are silent (empty Series). Returned
+    series are named by the original (non-Yahoo) ticker.
     """
-    out: dict[str, pd.Series] = {}
-    for t in tickers:
-        ys = yahoo_symbol(t, exchange)
+    if not items:
+        return {}, {}, []
+
+    yahoo_to_original: dict[str, str] = {}
+    for ticker, exchange in items:
+        ys = yahoo_symbol(ticker, exchange)
+        # If two inputs map to the same yahoo symbol, the later wins — fine for our use.
+        yahoo_to_original[ys] = ticker
+
+    all_symbols = list(yahoo_to_original.keys())
+    range_key = (str(start), str(end))
+    now = time.time()
+
+    cached_px: dict[str, pd.Series] = {}
+    cached_div: dict[str, pd.Series] = {}
+    need_px_symbols: list[str] = []
+    need_div_symbols: list[str] = []
+    px_recent_failure: set[str] = set()
+
+    with _CACHE_LOCK:
+        for ys in all_symbols:
+            px_key = ("PX", ys, *range_key)
+            div_key = ("DIV", ys, *range_key)
+
+            last_fail = _FAILURE_CACHE.get(px_key)
+            if last_fail is not None and (now - last_fail) < _FAILURE_BACKOFF_S:
+                px_recent_failure.add(ys)
+            else:
+                px = _PRICE_CACHE.get(px_key)
+                if px is not None and (now - px[0]) < _SUCCESS_TTL_S:
+                    cached_px[ys] = px[1].copy()
+                else:
+                    need_px_symbols.append(ys)
+
+            dv = _PRICE_CACHE.get(div_key)
+            if dv is not None and (now - dv[0]) < _SUCCESS_TTL_S:
+                cached_div[ys] = dv[1].copy()
+            else:
+                need_div_symbols.append(ys)
+
+    from .price_cache_db import (
+        load_prices_batch,
+        load_dividends_batch,
+        save_prices_async,
+        save_dividends_async,
+        gaps as compute_gaps,
+        db_available,
+    )
+
+    req_start: date_t = pd.Timestamp(start).date()
+    req_end: date_t = pd.Timestamp(end).date()
+
+    db_px: dict[str, pd.Series] = {}
+    db_px_covered: dict[str, list[tuple[date_t, date_t]]] = {}
+    db_div: dict[str, pd.Series] = {}
+    db_div_covered: dict[str, list[tuple[date_t, date_t]]] = {}
+
+    if db_available():
+        if need_px_symbols:
+            db_px, db_px_covered = load_prices_batch(need_px_symbols, req_start, req_end)
+        if need_div_symbols:
+            db_div, db_div_covered = load_dividends_batch(need_div_symbols, req_start, req_end)
+
+    db_on = db_available()
+    px_gaps: dict[str, list[tuple[date_t, date_t]]] = {}
+    for ys in need_px_symbols:
+        if db_on:
+            px_gaps[ys] = compute_gaps(req_start, req_end, db_px_covered.get(ys, []))
+        else:
+            px_gaps[ys] = [(req_start, req_end)]
+
+    div_gaps: dict[str, list[tuple[date_t, date_t]]] = {}
+    for ys in need_div_symbols:
+        if db_on:
+            div_gaps[ys] = compute_gaps(req_start, req_end, db_div_covered.get(ys, []))
+        else:
+            div_gaps[ys] = [(req_start, req_end)]
+
+    symbols_to_fetch: set[str] = set()
+    for ys, g in px_gaps.items():
+        if g:
+            symbols_to_fetch.add(ys)
+    for ys, g in div_gaps.items():
+        if g:
+            symbols_to_fetch.add(ys)
+
+    fetched_px: dict[str, pd.Series] = {}
+    fetched_div: dict[str, pd.Series] = {}
+    fetch_fail: set[str] = set()
+    fetch_start: date_t | None = None
+    fetch_end: date_t | None = None
+
+    if symbols_to_fetch:
+        gap_starts: list[date_t] = []
+        gap_ends: list[date_t] = []
+        for ys in symbols_to_fetch:
+            for gs, ge in px_gaps.get(ys, []) + div_gaps.get(ys, []):
+                gap_starts.append(gs)
+                gap_ends.append(ge)
+        fetch_start = min(gap_starts)
+        fetch_end = max(gap_ends)
+
         try:
-            out[t] = _fetch_cached_dividends(ys, start, end)
+            fetched_px, fetched_div, batch_failed = _fetch_batch_from_yfinance(
+                list(symbols_to_fetch),
+                pd.Timestamp(fetch_start),
+                pd.Timestamp(fetch_end) + pd.Timedelta(days=1),
+            )
+            fetch_fail.update(batch_failed)
         except Exception:
-            out[t] = pd.Series(dtype="float64", name=t)
-    return out
+            # Total HTTP-level failure — every symbol in this batch is a fetch failure.
+            fetch_fail.update(symbols_to_fetch)
+
+        if db_available() and fetch_start is not None and fetch_end is not None:
+            for ys in symbols_to_fetch:
+                if ys in fetch_fail:
+                    # Don't claim coverage we didn't get.
+                    continue
+                # Persist whatever we got for this symbol over the fetched window;
+                # an empty dividend Series with a coverage range correctly records
+                # "we asked, ticker paid nothing in this window".
+                save_prices_async(ys, fetched_px.get(ys, pd.Series(dtype="float64")), fetch_start, fetch_end)
+                save_dividends_async(ys, fetched_div.get(ys, pd.Series(dtype="float64")), fetch_start, fetch_end)
+
+    final_prices: dict[str, pd.Series] = {}
+    final_divs: dict[str, pd.Series] = {}
+    failed_originals: list[str] = []
+
+    for ys in all_symbols:
+        original = yahoo_to_original[ys]
+        px_key = ("PX", ys, *range_key)
+        div_key = ("DIV", ys, *range_key)
+
+        price_ok = False
+        # Prices
+        if ys in px_recent_failure:
+            failed_originals.append(original)
+        elif ys in cached_px:
+            s = cached_px[ys].copy()
+            s.name = original
+            final_prices[original] = s
+            price_ok = True
+        else:
+            parts: list[pd.Series] = []
+            db_s = db_px.get(ys, pd.Series(dtype="float64"))
+            if not db_s.empty:
+                parts.append(db_s)
+            if ys in fetched_px:
+                parts.append(fetched_px[ys])
+
+            if parts:
+                combined = pd.concat(parts).sort_index()
+                combined = combined[~combined.index.duplicated(keep="last")]
+                with _CACHE_LOCK:
+                    _PRICE_CACHE[px_key] = (time.time(), combined.copy())
+                combined.name = original
+                final_prices[original] = combined
+                price_ok = True
+            elif ys in fetch_fail:
+                with _CACHE_LOCK:
+                    _FAILURE_CACHE[px_key] = time.time()
+                failed_originals.append(original)
+            else:
+                # No data, no failure: treat as failure but don't poison the backoff cache.
+                failed_originals.append(original)
+
+        # Always populate the in-memory dividend cache (even for failed-price tickers
+        # and tickers that pay nothing) so subsequent calls don't re-fetch. Only the
+        # return value suppresses dividends for failed-price tickers, matching the
+        # pre-batch router behavior.
+        if ys in cached_div:
+            d = cached_div[ys].copy()
+        else:
+            parts = []
+            db_s = db_div.get(ys, pd.Series(dtype="float64"))
+            if not db_s.empty:
+                parts.append(db_s)
+            if ys in fetched_div:
+                parts.append(fetched_div[ys])
+
+            if parts:
+                d = pd.concat(parts).sort_index()
+                d = d[~d.index.duplicated(keep="last")]
+            else:
+                d = pd.Series(dtype="float64")
+
+            with _CACHE_LOCK:
+                _PRICE_CACHE[div_key] = (time.time(), d.copy())
+
+        if price_ok:
+            d.name = original
+            final_divs[original] = d
+
+    return final_prices, final_divs, failed_originals
 
 
 def clear_price_caches() -> None:
