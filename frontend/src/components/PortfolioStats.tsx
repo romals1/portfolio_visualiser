@@ -77,9 +77,8 @@ function computeStats(
 
   const lastIdx = dates.length - 1
   const lastNetReturn = netReturn[lastIdx]
-  const firstNetReturn = netReturn[firstNonZeroIdx]
 
-  const totalReturnAbsolute = lastNetReturn - firstNetReturn
+  const totalReturnAbsolute = lastNetReturn
   const totalReturnPercent = computeTotalReturnPercent(portfolioValue, netReturn)
 
   const nTradingDays = lastIdx - firstNonZeroIdx + 1
