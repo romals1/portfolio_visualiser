@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import Auth from './components/Auth'
-import FileUpload from './components/FileUpload'
+import UploadModal from './components/UploadModal'
 import TransactionTable from './components/TransactionTable'
 import ChartArea from './components/ChartArea'
 import PortfolioStats from './components/PortfolioStats'
@@ -23,6 +23,7 @@ export default function App() {
   const [computeError, setComputeError] = useState<string | null>(null)
   const [benchmarkTickers, setBenchmarkTickers] = useState<string[]>([])
   const [activeTab, setActiveTab] = useState<'transactions' | 'chart'>('transactions')
+  const [uploadOpen, setUploadOpen] = useState(false)
   const computeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const computeRequestIdRef = useRef(0)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -65,14 +66,6 @@ export default function App() {
       const kept = prev.filter((t: Transaction) => !newPortfolios.has(t.portfolio))
       return [...kept, ...newTxns].sort((a: Transaction, b: Transaction) => a.date.localeCompare(b.date))
     })
-    setComputeResult(null)
-    setComputeError(null)
-  }
-
-  const handleClearTransactions = () => {
-    loadCancelledRef.current = true
-    hasLoadedRef.current = true
-    setTransactions([])
     setComputeResult(null)
     setComputeError(null)
   }
@@ -275,12 +268,22 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
         {computeResult && <PortfolioStats result={computeResult} />}
 
-        <FileUpload onTransactionsParsed={handleTransactionsParsed} onClear={handleClearTransactions} />
-
         {isLoadingTransactions && transactions.length === 0 && (
           <div className="flex items-center justify-center gap-3 py-8 text-gray-400">
             <Spinner size={20} />
             <span className="text-sm">Loading saved transactions…</span>
+          </div>
+        )}
+
+        {!isLoadingTransactions && transactions.length === 0 && (
+          <div className="flex flex-col items-center justify-center gap-4 py-20 text-gray-400">
+            <p className="text-sm">No transactions loaded.</p>
+            <button
+              onClick={() => setUploadOpen(true)}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
+            >
+              Upload CSV
+            </button>
           </div>
         )}
 
@@ -295,7 +298,11 @@ export default function App() {
               onChange={(id) => setActiveTab(id as 'transactions' | 'chart')}
             />
             <div role="tabpanel" className={activeTab === 'transactions' ? '' : 'hidden'}>
-              <TransactionTable transactions={transactions} onChange={setTransactions} />
+              <TransactionTable
+                transactions={transactions}
+                onChange={setTransactions}
+                onUpload={() => setUploadOpen(true)}
+              />
             </div>
             <div role="tabpanel" className={activeTab === 'chart' ? '' : 'hidden'}>
               <ChartArea
@@ -310,6 +317,12 @@ export default function App() {
             </div>
           </div>
         )}
+
+        <UploadModal
+          isOpen={uploadOpen}
+          onClose={() => setUploadOpen(false)}
+          onTransactionsParsed={handleTransactionsParsed}
+        />
       </main>
     </div>
   )
