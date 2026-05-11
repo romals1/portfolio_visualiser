@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ComputeResult, Transaction } from '../types'
 import PortfolioChart from './PortfolioChart'
+import Spinner from './Spinner'
 
 type View = 'total' | 'by_symbol'
 type Metric = 'portfolio_value' | 'net_return' | 'rolling_return' | 'breakdown'
@@ -132,8 +133,9 @@ export default function ChartArea({ transactions, computeResult, isComputing, co
         </div>
 
         {isComputing && (
-          <div className="text-sm text-gray-400">
-            Computing portfolio…
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <Spinner size={14} />
+            <span>Fetching prices and computing portfolio…</span>
           </div>
         )}
 
