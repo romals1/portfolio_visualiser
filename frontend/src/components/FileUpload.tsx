@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import api from '../api/client'
 import { Transaction } from '../types'
+import Spinner from './Spinner'
 
 interface Props {
   onTransactionsParsed: (txns: Transaction[]) => void
@@ -80,7 +81,10 @@ export default function FileUpload({ onTransactionsParsed, onClear }: Props) {
           onChange={handleChange}
         />
         {loading ? (
-          <p className="text-gray-400">Parsing files…</p>
+          <div className="flex items-center justify-center gap-2 text-gray-400">
+            <Spinner size={18} />
+            <span>Parsing files…</span>
+          </div>
         ) : (
           <>
             <p className="text-gray-300">Drop CSV files here or click to browse</p>

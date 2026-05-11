@@ -5,6 +5,7 @@ import TransactionTable from './components/TransactionTable'
 import ChartArea from './components/ChartArea'
 import PortfolioStats from './components/PortfolioStats'
 import Tabs from './components/Tabs'
+import Spinner from './components/Spinner'
 import { Transaction, ComputeResult } from './types'
 import api from './api/client'
 import supabase from './api/supabase'
@@ -18,6 +19,7 @@ export default function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [computeResult, setComputeResult] = useState<ComputeResult | null>(null)
   const [isComputing, setIsComputing] = useState(false)
+  const [isLoadingTransactions, setIsLoadingTransactions] = useState(false)
   const [computeError, setComputeError] = useState<string | null>(null)
   const [benchmarkTickers, setBenchmarkTickers] = useState<string[]>([])
   const [activeTab, setActiveTab] = useState<'transactions' | 'chart'>('transactions')
@@ -135,6 +137,7 @@ export default function App() {
     skipNextSaveRef.current = false
 
     const loadTransactions = async () => {
+      setIsLoadingTransactions(true)
       try {
         const resp = await api.get('/api/transactions')
         // If the user uploaded/cleared while we were loading, drop the result.
@@ -153,6 +156,8 @@ export default function App() {
       } catch {
         // Silently fail if endpoint not available (e.g., Supabase not configured)
         hasLoadedRef.current = true
+      } finally {
+        setIsLoadingTransactions(false)
       }
     }
 
@@ -271,6 +276,13 @@ export default function App() {
         {computeResult && <PortfolioStats result={computeResult} />}
 
         <FileUpload onTransactionsParsed={handleTransactionsParsed} onClear={handleClearTransactions} />
+
+        {isLoadingTransactions && transactions.length === 0 && (
+          <div className="flex items-center justify-center gap-3 py-8 text-gray-400">
+            <Spinner size={20} />
+            <span className="text-sm">Loading saved transactions…</span>
+          </div>
+        )}
 
         {transactions.length > 0 && (
           <div className="space-y-4">
