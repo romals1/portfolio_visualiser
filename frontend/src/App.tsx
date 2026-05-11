@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import Auth from './components/Auth'
 import UploadModal from './components/UploadModal'
 import TransactionTable from './components/TransactionTable'
+import HoldingsTable from './components/HoldingsTable'
 import ChartArea from './components/ChartArea'
 import PortfolioStats from './components/PortfolioStats'
 import Tabs from './components/Tabs'
@@ -22,7 +23,7 @@ export default function App() {
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(false)
   const [computeError, setComputeError] = useState<string | null>(null)
   const [benchmarkTickers, setBenchmarkTickers] = useState<string[]>([])
-  const [activeTab, setActiveTab] = useState<'transactions' | 'chart'>('transactions')
+  const [activeTab, setActiveTab] = useState<'transactions' | 'holdings' | 'chart'>('transactions')
   const [uploadOpen, setUploadOpen] = useState(false)
   const computeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const computeRequestIdRef = useRef(0)
@@ -292,10 +293,11 @@ export default function App() {
             <Tabs
               tabs={[
                 { id: 'transactions', label: 'Transactions' },
+                { id: 'holdings', label: 'Holdings' },
                 { id: 'chart', label: 'Chart' },
               ]}
               active={activeTab}
-              onChange={(id) => setActiveTab(id as 'transactions' | 'chart')}
+              onChange={(id) => setActiveTab(id as 'transactions' | 'holdings' | 'chart')}
             />
             <div role="tabpanel" className={activeTab === 'transactions' ? '' : 'hidden'}>
               <TransactionTable
@@ -303,6 +305,9 @@ export default function App() {
                 onChange={setTransactions}
                 onUpload={() => setUploadOpen(true)}
               />
+            </div>
+            <div role="tabpanel" className={activeTab === 'holdings' ? '' : 'hidden'}>
+              <HoldingsTable result={computeResult} />
             </div>
             <div role="tabpanel" className={activeTab === 'chart' ? '' : 'hidden'}>
               <ChartArea
