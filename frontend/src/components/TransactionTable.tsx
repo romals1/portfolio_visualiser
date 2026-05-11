@@ -9,6 +9,10 @@ interface Props {
 const ACTIONS = ['BUY', 'SELL', 'DIV']
 const EXCHANGES = ['ASX', 'US']
 
+function currencyForExchange(exchange: string): string {
+  return exchange === 'ASX' ? 'AUD' : 'USD'
+}
+
 function emptyRow(): Transaction {
   return {
     date: '',
@@ -18,6 +22,7 @@ function emptyRow(): Transaction {
     price: 0,
     fees: 0,
     exchange: 'US',
+    currency: 'USD',
     portfolio: 'manual',
   }
 }
@@ -41,7 +46,16 @@ export default function TransactionTable({ transactions, onChange }: Props) {
   const [open, setOpen] = useState(false)
 
   const update = (i: number, field: keyof Transaction, value: string | number) => {
-    onChange(transactions.map((r, idx) => (idx === i ? { ...r, [field]: value } : r)))
+    onChange(
+      transactions.map((r, idx) => {
+        if (idx !== i) return r
+        const next = { ...r, [field]: value }
+        if (field === 'exchange') {
+          next.currency = currencyForExchange(String(value))
+        }
+        return next
+      }),
+    )
   }
 
   const addRow = () => onChange([...transactions, emptyRow()])

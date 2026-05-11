@@ -38,13 +38,8 @@ async def parse_transactions(files: list[UploadFile] = File(...)):
         return {"transactions": []}
 
     combined = pd.concat(all_frames, ignore_index=True).sort_values("date").reset_index(drop=True)
-    from ..services.data import convert_aud_to_usd
-    try:
-        combined = convert_aud_to_usd(combined)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
     combined["date"] = combined["date"].dt.strftime("%Y-%m-%d")
-    cols = ["date", "ticker", "action", "quantity", "price", "fees", "exchange", "portfolio"]
+    cols = ["date", "ticker", "action", "quantity", "price", "fees", "exchange", "currency", "portfolio"]
     result = combined.reindex(columns=cols).fillna({"fees": 0.0}).to_dict(orient="records")
     return {"transactions": result}
 
@@ -55,9 +50,11 @@ async def fetch_prices(request: PriceRequest):
     Fetch prices and dividends for multiple tickers.
     Returns {prices: {<ticker>: {dates, values}}, dividends: {<ticker>: {dates, values}}, failed: []}
 
-    Prices are raw (unadjusted) close. Dividends are per-share amounts on ex-div
-    dates in the ticker's local currency. Dividend fetch failures are silent —
-    a ticker that genuinely pays no dividends gets an empty entry.
+    Prices are raw (unadjusted) close in the ticker's local currency (ASX prices
+    stay in AUD). Dividends are per-share amounts on ex-div dates in the ticker's
+    local currency. Dividend fetch failures are silent — a ticker that genuinely
+    pays no dividends gets an empty entry. FX conversion (e.g. AUD→USD) is the
+    caller's responsibility — request AUDUSD=X with exchange="US".
 
     Note: Returns are keyed by ticker symbol (e.g., "AAPL", "AUDUSD=X") for simplicity.
     For production with cross-exchange symbol collisions, consider keying by f"{exchange}:{ticker}".
@@ -111,67 +108,6 @@ async def fetch_prices(request: PriceRequest):
                 "values": [float(v) for v in s.values],
             }
 
-    # Convert ASX (AUD) prices and dividends to USD using forward-filled FX
-    # rates aligned to each ticker's date axis. Forward fill handles weekends,
-    # holidays, and any FX date misses; back fill covers leading gaps. Using
-    # a 1.0 fallback would silently produce wildly wrong values, so we instead
-    # fail loudly by appending the affected ticker to `failed` if FX is missing.
-    asx_tickers = set(by_exchange.get("ASX", []))
-    if asx_tickers:
-        from ..services.prices import fetch_audusd_rates
-        fx_series = fetch_audusd_rates(start_dt, end_dt)
-        if fx_series.empty:
-            failed.append("AUDUSD=X (FX conversion unavailable)")
-            for ticker in asx_tickers:
-                failed.append(f"{ticker} (ASX, no FX)")
-                prices_result.pop(ticker, None)
-                dividends_result.pop(ticker, None)
-        else:
-            # Build a unified date index from all ASX price/dividend dates,
-            # reindex the FX series onto it with ffill+bfill, then look up
-            # rates by date string.
-            all_dates_set: set[str] = set()
-            for ticker in asx_tickers:
-                if ticker in prices_result:
-                    all_dates_set.update(prices_result[ticker]["dates"])
-                if ticker in dividends_result:
-                    all_dates_set.update(dividends_result[ticker]["dates"])
-            if all_dates_set:
-                date_index = pd.DatetimeIndex(sorted(pd.Timestamp(d) for d in all_dates_set))
-                fx_aligned = fx_series.reindex(
-                    fx_series.index.union(date_index)
-                ).ffill().bfill().reindex(date_index)
-                fx_map = {
-                    d.strftime("%Y-%m-%d"): float(v)
-                    for d, v in fx_aligned.items()
-                    if not pd.isna(v)
-                }
-            else:
-                fx_map = {}
-
-            for ticker in asx_tickers:
-                if ticker in prices_result:
-                    pd_data = prices_result[ticker]
-                    if all(d in fx_map for d in pd_data["dates"]):
-                        prices_result[ticker]["values"] = [
-                            v * fx_map[d]
-                            for d, v in zip(pd_data["dates"], pd_data["values"])
-                        ]
-                    else:
-                        # Should be unreachable given ffill+bfill, but fail
-                        # loudly rather than silently leaving AUD values.
-                        failed.append(f"{ticker} (ASX, partial FX)")
-                        prices_result.pop(ticker, None)
-                if ticker in dividends_result:
-                    div_data = dividends_result[ticker]
-                    if all(d in fx_map for d in div_data["dates"]):
-                        dividends_result[ticker]["values"] = [
-                            v * fx_map[d]
-                            for d, v in zip(div_data["dates"], div_data["values"])
-                        ]
-                    else:
-                        dividends_result[ticker] = {"dates": [], "values": []}
-
     return {"prices": prices_result, "dividends": dividends_result, "failed": failed}
 
 
@@ -224,7 +160,7 @@ async def get_transactions(user: _AuthedUser = Depends(get_authed_user)):
         client.postgrest.auth(user.token)
         resp = (
             client.table("user_transaction_rows")
-            .select("date,ticker,action,quantity,price,fees,exchange,portfolio")
+            .select("date,ticker,action,quantity,price,fees,exchange,currency,portfolio")
             .eq("user_id", user.user_id)
             .order("date", desc=False)
             .order("created_at", desc=False)
@@ -263,6 +199,7 @@ async def save_transactions(body: TransactionsRequest, user: _AuthedUser = Depen
                     "price": t["price"],
                     "fees": t.get("fees", 0),
                     "exchange": t["exchange"],
+                    "currency": t.get("currency") or ("AUD" if t["exchange"] == "ASX" else "USD"),
                     "portfolio": t["portfolio"],
                 }
                 for t in body.transactions

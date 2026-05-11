@@ -18,6 +18,10 @@ interface PricesResponse {
   failed: string[]
 }
 
+const FX_SYMBOLS: Record<string, string> = {
+  AUD: 'AUDUSD=X',
+}
+
 function parseDate(dateStr: string): Date {
   return new Date(dateStr + 'T00:00:00Z')
 }
@@ -46,6 +50,16 @@ function forwardFillPrices(
   }
 
   return result
+}
+
+// Forward + back fill a (sparse) FX series onto a target axis. The first
+// trading day for a currency may precede the first FX bar by a day or two
+// (e.g. an AUD trade on a Monday, FX series starting Tuesday) — back fill
+// covers that leading gap so we never multiply by NaN.
+function fxOnAxis(fxData: PriceData, axis: string[]): number[] {
+  const forward = forwardFillPrices(fxData.values, fxData.dates, axis)
+  const firstReal = fxData.values.length > 0 ? fxData.values[0] : 1
+  return forward.map(v => (Number.isFinite(v) ? v : firstReal))
 }
 
 function alignToAxis(
@@ -124,7 +138,7 @@ export async function computePortfolio(
   const txns: TransactionWithFields[] = transactions.map(t => ({
     ...t,
     portfolio: t.portfolio || 'manual',
-    currency: t.exchange === 'ASX' ? 'AUD' : 'USD',
+    currency: t.currency || (t.exchange === 'ASX' ? 'AUD' : 'USD'),
     net_amount:
       t.action === 'BUY'
         ? -(t.quantity * t.price + (t.fees || 0))
@@ -160,7 +174,7 @@ export async function computePortfolio(
 
   // Collect all ticker/exchange pairs needed across all portfolios
   const allTickersToFetch = new Set<string>()
-  const tickersByExchange: Record<string, Set<string>> = {}
+  const fxCurrenciesNeeded = new Set<string>()
 
   for (const { txns: portfolioTxns } of portfolioMap.values()) {
     const currencyMap = new Map<string, TransactionWithFields[]>()
@@ -179,20 +193,17 @@ export async function computePortfolio(
       const exchange = tradeRows[0].exchange
       for (const txn of tradeRows) {
         allTickersToFetch.add(`${exchange}:${txn.ticker}`)
-        if (!tickersByExchange[exchange]) {
-          tickersByExchange[exchange] = new Set()
-        }
-        tickersByExchange[exchange].add(txn.ticker)
+      }
+      if (currency !== 'USD' && FX_SYMBOLS[currency]) {
+        fxCurrenciesNeeded.add(currency)
       }
     }
   }
 
   // Calculate min/max transaction dates
   let minTxnDate = formatDate(new Date())
-  let maxTxnDate = formatDate(new Date())
   if (txns.length > 0) {
     minTxnDate = txns.reduce((min, t) => t.date < min ? t.date : min, txns[0].date)
-    maxTxnDate = txns.reduce((max, t) => t.date > max ? t.date : max, txns[0].date)
   }
 
   const startDate = new Date(minTxnDate + 'T00:00:00Z')
@@ -202,16 +213,19 @@ export async function computePortfolio(
   const startStr = formatDate(startDate)
   const endStr = formatDate(endDate)
 
-  // Single batched price fetch for all tickers
+  // Single batched fetch for instrument prices + FX rates needed for conversion.
   let allPricesData: Record<string, PriceData> = {}
   let allDividendsData: Record<string, PriceData> = {}
-  let allFailedTickers: string[] = []
-  if (allTickersToFetch.size > 0) {
+  const fxData: Record<string, PriceData> = {}
+  if (allTickersToFetch.size > 0 || fxCurrenciesNeeded.size > 0) {
     try {
       const ticketList = Array.from(allTickersToFetch).map(key => {
         const [exchange, ticker] = key.split(':')
         return { ticker, exchange }
       })
+      for (const ccy of fxCurrenciesNeeded) {
+        ticketList.push({ ticker: FX_SYMBOLS[ccy], exchange: 'US' })
+      }
       const resp = await api.post<PricesResponse>('/api/prices', {
         tickers: ticketList,
         start: startStr,
@@ -219,9 +233,17 @@ export async function computePortfolio(
       })
       allPricesData = resp.data.prices
       allDividendsData = resp.data.dividends || {}
-      allFailedTickers = resp.data.failed || []
-    } catch (err) {
-      allFailedTickers = Array.from(allTickersToFetch)
+
+      for (const ccy of fxCurrenciesNeeded) {
+        const sym = FX_SYMBOLS[ccy]
+        const series = allPricesData[sym]
+        if (series) {
+          fxData[ccy] = series
+          delete allPricesData[sym]
+        }
+      }
+    } catch {
+      // failures propagated per-ticker below
     }
   }
 
@@ -235,7 +257,6 @@ export async function computePortfolio(
     const scrParts: Record<string, number[]>[] = []
     const sdcParts: Record<string, number[]>[] = []
     let allSortedDates: string[] = []
-    let dispCurrency = 'USD'
 
     const currencyMap = new Map<string, TransactionWithFields[]>()
     for (const txn of portfolioTxns) {
@@ -250,7 +271,6 @@ export async function computePortfolio(
       const tradeRows = currencyTxns.filter(t => ['BUY', 'SELL'].includes(t.action))
       if (tradeRows.length === 0) continue
 
-      const exchange = tradeRows[0].exchange
       const tickers = Array.from(new Set(tradeRows.map(t => t.ticker)))
 
       // Use pre-fetched prices
@@ -272,11 +292,26 @@ export async function computePortfolio(
         continue
       }
 
+      // FX series → USD. USD currency uses an all-ones array.
+      let fxFeed: PriceData | null = null
+      if (currency !== 'USD') {
+        const fxSym = FX_SYMBOLS[currency]
+        if (!fxSym || !fxData[currency]) {
+          fetchFailures.push(`${portfolioName} (${currency}): missing FX rate ${fxSym ?? '?'}`)
+          continue
+        }
+        fxFeed = fxData[currency]
+      }
+
       const allDates = new Set<string>()
       for (const ticker in pricesData) {
         pricesData[ticker].dates.forEach(d => allDates.add(d))
       }
       const sortedDates = Array.from(allDates).sort()
+
+      const fxAxis: number[] = fxFeed
+        ? fxOnAxis(fxFeed, sortedDates)
+        : new Array(sortedDates.length).fill(1)
 
       const prices: Record<string, number[]> = {}
       for (const ticker of tickers) {
@@ -297,29 +332,30 @@ export async function computePortfolio(
         positions[ticker] = cumsum(aligned)
       }
 
+      // Position value in USD: shares × native price × FX(date)
       const symbolValues: Record<string, number[]> = {}
       for (const ticker of tickers) {
-        symbolValues[ticker] = positions[ticker].map((pos, i) => pos * prices[ticker][i])
+        symbolValues[ticker] = positions[ticker].map(
+          (pos, i) => pos * prices[ticker][i] * fxAxis[i]
+        )
       }
 
       const portfolioValue = symbolValues[tickers[0]].map((_, i) => {
         return tickers.reduce((sum, t) => sum + (symbolValues[t][i] || 0), 0)
       })
 
-      // Build per-symbol dividend cashflows from yfinance ex-div events
-      // weighted by shares held on each ex-div date. Authoritative source for
-      // dividends — user CSV DIV rows are ignored (Superhero/IB parsers strip
-      // them anyway, and yfinance gives consistent figures across formats).
+      // Per-symbol dividend cashflows in USD: shares × per-share native ×
+      // FX rate on the aligned bar's date. yfinance is the authoritative
+      // dividend source — user CSV DIV rows are ignored.
       const symbolDivCashflows: Record<string, number[]> = {}
       for (const ticker of tickers) {
         const divFeed = allDividendsData[ticker]
-        const events: { date: string; value: number }[] = []
+        const aligned = new Array(sortedDates.length).fill(0)
         if (divFeed) {
           const dateToIdx = new Map(sortedDates.map((d, i) => [d, i]))
           for (let k = 0; k < divFeed.dates.length; k++) {
             const exDate = divFeed.dates[k]
             const perShare = divFeed.values[k]
-            // align ex-div date to a price bar (next trading day if needed)
             let idx = dateToIdx.get(exDate)
             if (idx === undefined) {
               idx = sortedDates.findIndex(d => d >= exDate)
@@ -327,14 +363,15 @@ export async function computePortfolio(
             }
             const shares = positions[ticker][idx] ?? 0
             if (shares <= 0) continue
-            events.push({ date: sortedDates[idx], value: shares * perShare })
+            aligned[idx] += shares * perShare * fxAxis[idx]
           }
         }
-        const aligned = alignToAxis(events, sortedDates)
         symbolDivCashflows[ticker] = cumsum(aligned)
       }
 
-      // Trade cashflows from BUY/SELL only — DIV CSV rows are ignored
+      // Trade cashflows in USD: net_amount on each trade date × FX on that
+      // axis date. Converting at the time the cashflow happened (not at the
+      // current FX rate) preserves the historical USD value of the cashflow.
       const symbolTradeCashflows: Record<string, number[]> = {}
       for (const ticker of tickers) {
         const cfEvents = currencyTxns
@@ -343,8 +380,9 @@ export async function computePortfolio(
             date: t.date,
             value: t.net_amount,
           }))
-        const aligned = alignToAxis(cfEvents, sortedDates)
-        symbolTradeCashflows[ticker] = cumsum(aligned)
+        const alignedNative = alignToAxis(cfEvents, sortedDates)
+        const alignedUsd = alignedNative.map((v, i) => v * fxAxis[i])
+        symbolTradeCashflows[ticker] = cumsum(alignedUsd)
       }
 
       // Total per-symbol cashflow = trades + dividends received
@@ -371,8 +409,6 @@ export async function computePortfolio(
       const totalDivCashflows = sortedDates.map((_, i) => tickers.reduce((sum, t) => sum + (symbolDivCashflows[t][i] || 0), 0))
       const capitalReturn = netReturn.map((nr, i) => nr - totalDivCashflows[i])
 
-      dispCurrency = 'USD'
-
       pvParts.push(portfolioValue)
       nrParts.push(netReturn)
       crParts.push(capitalReturn)
@@ -394,7 +430,7 @@ export async function computePortfolio(
         symbol_net_returns: sumDataFrames(snrParts),
         symbol_capital_returns: sumDataFrames(scrParts),
         symbol_div_cashflows: sumDataFrames(sdcParts),
-        display_currency: dispCurrency,
+        display_currency: 'USD',
         dates: allSortedDates,
       }
     }

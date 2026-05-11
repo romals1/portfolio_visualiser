@@ -7,7 +7,7 @@ export interface Transaction {
   fees: number
   exchange: string
   portfolio: string
-  currency?: string
+  currency: string
 }
 
 export interface SymbolData {
