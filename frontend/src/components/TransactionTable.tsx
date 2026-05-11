@@ -4,6 +4,7 @@ import { Transaction } from '../types'
 interface Props {
   transactions: Transaction[]
   onChange: (txns: Transaction[]) => void
+  onUpload: () => void
 }
 
 type SortDir = 'asc' | 'desc'
@@ -60,7 +61,7 @@ function downloadCSV(txns: Transaction[]) {
   URL.revokeObjectURL(url)
 }
 
-export default function TransactionTable({ transactions, onChange }: Props) {
+export default function TransactionTable({ transactions, onChange, onUpload }: Props) {
   const [sortKey, setSortKey] = useState<keyof Transaction>('date')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [filters, setFilters] = useState<Partial<Record<keyof Transaction, string>>>({})
@@ -120,9 +121,14 @@ export default function TransactionTable({ transactions, onChange }: Props) {
     <div className="space-y-2">
       <div className="flex items-center justify-between mb-2">
         <h2 className="text-sm font-medium text-gray-300">Transactions ({transactions.length} rows)</h2>
-        <button onClick={() => downloadCSV(transactions)} className="text-xs text-blue-400 hover:text-blue-300">
-          Download CSV
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={onUpload} className="text-xs text-blue-400 hover:text-blue-300">
+            Upload CSV
+          </button>
+          <button onClick={() => downloadCSV(transactions)} className="text-xs text-blue-400 hover:text-blue-300">
+            Download CSV
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-gray-800">
