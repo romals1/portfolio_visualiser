@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Auth from './components/Auth'
 import UploadModal from './components/UploadModal'
-import TransactionTable from './components/TransactionTable'
+import TransactionTable, { emptyRow } from './components/TransactionTable'
 import HoldingsTable from './components/HoldingsTable'
 import ChartArea from './components/ChartArea'
 import PortfolioStats from './components/PortfolioStats'
@@ -306,12 +306,25 @@ export default function App() {
         {!isLoadingTransactions && transactions.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-4 py-20 text-gray-400">
             <p className="text-sm">No transactions loaded.</p>
-            <button
-              onClick={() => setUploadOpen(true)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
-            >
-              Upload CSV
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setUploadOpen(true)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                Upload CSV
+              </button>
+              <button
+                onClick={() => {
+                  loadCancelledRef.current = true
+                  hasLoadedRef.current = true
+                  setTransactions([emptyRow()])
+                  setActiveTab('transactions')
+                }}
+                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-100 rounded-lg text-sm font-medium transition-colors"
+              >
+                Add transaction manually
+              </button>
+            </div>
           </div>
         )}
 

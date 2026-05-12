@@ -32,7 +32,7 @@ const COLUMNS: Column[] = [
   { key: 'portfolio', label: 'Portfolio' },
 ]
 
-function emptyRow(): Transaction {
+export function emptyRow(): Transaction {
   return {
     date: '',
     ticker: '',
