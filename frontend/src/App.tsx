@@ -267,7 +267,34 @@ export default function App() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-        {computeResult && <PortfolioStats result={computeResult} />}
+        {transactions.length > 0 && (
+          <>
+            {computeError ? (
+              <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+                <p className="text-rose-400 text-sm">{computeError}</p>
+              </div>
+            ) : !computeResult && isComputing ? (
+              <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+                <div className="flex items-center justify-center gap-3 py-6 text-gray-400">
+                  <Spinner size={20} />
+                  <span className="text-sm">Fetching prices and computing portfolio…</span>
+                </div>
+              </div>
+            ) : computeResult ? (
+              <>
+                {computeResult.failed_tickers.length > 0 && (
+                  <div className="bg-gray-900 rounded-xl border border-gray-800 p-4 text-yellow-400 text-sm">
+                    <p>Could not fetch prices for:</p>
+                    <ul className="list-disc list-inside">
+                      {computeResult.failed_tickers.map((t) => <li key={t}>{t}</li>)}
+                    </ul>
+                  </div>
+                )}
+                <PortfolioStats result={computeResult} />
+              </>
+            ) : null}
+          </>
+        )}
 
         {isLoadingTransactions && transactions.length === 0 && (
           <div className="flex items-center justify-center gap-3 py-8 text-gray-400">
@@ -311,10 +338,8 @@ export default function App() {
             </div>
             <div role="tabpanel" className={activeTab === 'chart' ? '' : 'hidden'}>
               <ChartArea
-                transactions={transactions}
                 computeResult={computeResult}
                 isComputing={isComputing}
-                computeError={computeError}
                 benchmarkTickers={benchmarkTickers}
                 onBenchmarkChange={setBenchmarkTickers}
                 onClearCache={handleClearCache}

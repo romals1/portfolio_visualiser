@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ComputeResult, Transaction } from '../types'
+import { ComputeResult } from '../types'
 import PortfolioChart from './PortfolioChart'
 import Spinner from './Spinner'
 
@@ -8,10 +8,8 @@ type Metric = 'portfolio_value' | 'net_return' | 'rolling_return' | 'breakdown'
 type Range = 'All' | 'YTD' | '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y'
 
 interface Props {
-  transactions: Transaction[]
   computeResult: ComputeResult | null
   isComputing: boolean
-  computeError: string | null
   benchmarkTickers: string[]
   onBenchmarkChange: (tickers: string[]) => void
   onClearCache: () => void
@@ -47,7 +45,7 @@ function RadioGroup<T extends string>({
   )
 }
 
-export default function ChartArea({ transactions, computeResult, isComputing, computeError, benchmarkTickers, onBenchmarkChange, onClearCache }: Props) {
+export default function ChartArea({ computeResult, isComputing, benchmarkTickers, onBenchmarkChange, onClearCache }: Props) {
   const [view, setView] = useState<View>('total')
   const [metric, setMetric] = useState<Metric>('portfolio_value')
   const [range, setRange] = useState<Range>('All')
@@ -146,18 +144,6 @@ export default function ChartArea({ transactions, computeResult, isComputing, co
           >
             Retry fetching prices
           </button>
-        )}
-
-        {computeError && (
-          <p className="text-red-400 text-sm">{computeError}</p>
-        )}
-        {computeResult && computeResult.failed_tickers.length > 0 && (
-          <div className="text-yellow-400 text-sm">
-            <p>Could not fetch prices for:</p>
-            <ul className="list-disc list-inside">
-              {computeResult.failed_tickers.map((t) => <li key={t}>{t}</li>)}
-            </ul>
-          </div>
         )}
       </div>
 
