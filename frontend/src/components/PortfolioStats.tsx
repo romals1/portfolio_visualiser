@@ -25,6 +25,7 @@ function getColorClass(value: number): string {
 }
 
 interface Stats {
+  currentValue: number
   totalReturnAbsolute: number
   totalReturnPercent: number
   annualizedReturn: number
@@ -67,6 +68,7 @@ function computeStats(
   const firstNonZeroIdx = portfolioValue.findIndex((v) => v > 0)
   if (firstNonZeroIdx === -1 || dates.length < 2) {
     return {
+      currentValue: portfolioValue[portfolioValue.length - 1] ?? 0,
       totalReturnAbsolute: 0,
       totalReturnPercent: 0,
       annualizedReturn: 0,
@@ -77,6 +79,7 @@ function computeStats(
 
   const lastIdx = dates.length - 1
   const lastNetReturn = netReturn[lastIdx]
+  const currentValue = portfolioValue[lastIdx]
 
   const totalReturnAbsolute = lastNetReturn
   const totalReturnPercent = computeTotalReturnPercent(portfolioValue, netReturn)
@@ -97,6 +100,7 @@ function computeStats(
   }
 
   return {
+    currentValue,
     totalReturnAbsolute,
     totalReturnPercent,
     annualizedReturn,
@@ -111,25 +115,28 @@ function StatCard({
   percentValue,
   currency,
   showAbsolute = true,
+  neutral = false,
 }: {
   title: string
   absoluteValue: number
   percentValue: number
   currency: string
   showAbsolute?: boolean
+  neutral?: boolean
 }) {
   const primary = showAbsolute ? absoluteValue : percentValue
   const primaryFormatted = showAbsolute
     ? formatCurrency(absoluteValue, currency)
     : formatPercent(percentValue)
+  const primaryColor = neutral ? 'text-gray-100' : getColorClass(primary)
 
   return (
     <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
       <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">{title}</p>
-      <p className={`text-3xl font-semibold ${getColorClass(primary)} mb-1`}>
+      <p className={`text-3xl font-semibold ${primaryColor} mb-1`}>
         {primaryFormatted}
       </p>
-      {showAbsolute && (
+      {showAbsolute && !neutral && (
         <p className={`text-sm ${getColorClass(percentValue)}`}>
           {formatPercent(percentValue)}
         </p>
@@ -140,7 +147,14 @@ function StatCard({
 
 function StatsRow({ stats, currency }: { stats: Stats; currency: string }) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <StatCard
+        title="Current value"
+        absoluteValue={stats.currentValue}
+        percentValue={0}
+        currency={currency}
+        neutral
+      />
       <StatCard
         title="Total return"
         absoluteValue={stats.totalReturnAbsolute}
