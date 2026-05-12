@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import Plot from 'react-plotly.js'
 import { ComputeResult } from '../types'
 
@@ -164,6 +165,19 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
   const showLegend =
     multiPortfolio || bySymbol || showRolling || showBreakdown || Object.keys(benchmarks).length > 0
 
+  const [isNarrow, setIsNarrow] = useState(
+    typeof window !== 'undefined' ? window.innerWidth < 640 : false,
+  )
+  useEffect(() => {
+    const onResize = () => setIsNarrow(window.innerWidth < 640)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  const legendLayout = isNarrow
+    ? { bgcolor: 'rgba(0,0,0,0)', bordercolor: '#374151', orientation: 'h' as const, y: -0.25, x: 0, xanchor: 'left' as const, yanchor: 'top' as const }
+    : { bgcolor: 'rgba(0,0,0,0)', bordercolor: '#374151' }
+
   const shapes =
     showRolling || showNetReturn || showBreakdown
       ? [{ type: 'line', x0: 0, x1: 1, xref: 'paper', y0: 0, y1: 0, line: { color: '#6b7280', width: 1, dash: 'dash' } }]
@@ -178,9 +192,9 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
           plot_bgcolor: 'transparent',
           font: { color: '#e5e7eb', family: 'ui-sans-serif, system-ui, sans-serif' },
           height: 500,
-          margin: { t: 40, b: 40, l: 70, r: 20 },
+          margin: { t: 40, b: isNarrow && showLegend ? 120 : 40, l: 70, r: 20 },
           showlegend: showLegend,
-          legend: { bgcolor: 'rgba(0,0,0,0)', bordercolor: '#374151' },
+          legend: legendLayout,
           xaxis: { gridcolor: '#1f2937', linecolor: '#374151', tickcolor: '#374151' },
           yaxis: {
             title: { text: yTitle },
