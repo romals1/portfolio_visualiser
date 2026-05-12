@@ -57,7 +57,7 @@ function formatPercent(value: number): string {
 }
 
 function colorClass(v: number): string {
-  return v >= 0 ? 'text-emerald-400' : 'text-rose-400'
+  return v >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
 }
 
 // Same day-weighted return calculation used in PortfolioStats:
@@ -171,7 +171,7 @@ export default function HoldingsTable({ result }: Props) {
 
   if (!result || rows.length === 0) {
     return (
-      <div className="rounded-lg border border-gray-800 bg-gray-900 p-8 text-center text-sm text-gray-400">
+      <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-8 text-center text-sm text-gray-600 dark:text-gray-400">
         No current holdings to display.
       </div>
     )
@@ -180,17 +180,17 @@ export default function HoldingsTable({ result }: Props) {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-sm font-medium text-gray-300">
+        <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300">
           Holdings ({rows.length} {rows.length === 1 ? 'symbol' : 'symbols'})
         </h2>
-        <span className="text-sm text-gray-400">
-          Total: <span className="text-gray-200 font-medium">{formatCurrency(totalValue, displayCurrency)}</span>
+        <span className="text-sm text-gray-600 dark:text-gray-400">
+          Total: <span className="text-gray-800 dark:text-gray-200 font-medium">{formatCurrency(totalValue, displayCurrency)}</span>
         </span>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-gray-800">
+      <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
         <table className="min-w-full text-sm">
-          <thead className="bg-gray-800 text-gray-400">
+          <thead className="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
             <tr>
               {COLUMNS.map(({ key, label, align }) => {
                 const arrow = sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
@@ -199,7 +199,7 @@ export default function HoldingsTable({ result }: Props) {
                     key={key}
                     onClick={() => toggleSort(key)}
                     className={
-                      'px-3 py-2 font-medium whitespace-nowrap cursor-pointer select-none hover:text-white ' +
+                      'px-3 py-2 font-medium whitespace-nowrap cursor-pointer select-none hover:text-gray-900 dark:hover:text-white ' +
                       (align === 'right' ? 'text-right' : 'text-left')
                     }
                   >
@@ -216,22 +216,22 @@ export default function HoldingsTable({ result }: Props) {
                     value={filters[key] ?? ''}
                     onChange={(e) => setFilter(key, e.target.value)}
                     placeholder="filter..."
-                    className="w-full bg-gray-900 text-gray-200 placeholder-gray-600 rounded px-1 py-0.5 text-xs font-normal focus:outline-none"
+                    className="w-full bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 rounded px-1 py-0.5 text-xs font-normal focus:outline-none"
                     onClick={(e) => e.stopPropagation()}
                   />
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-800">
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
             {sorted.map((row, idx) => (
               <tr
                 key={`${row.portfolio}::${row.ticker}`}
-                className={(idx % 2 === 0 ? 'bg-gray-950' : 'bg-gray-900') + ' hover:bg-gray-800'}
+                className={(idx % 2 === 0 ? 'bg-gray-50 dark:bg-gray-950' : 'bg-white dark:bg-gray-900') + ' hover:bg-gray-200 dark:hover:bg-gray-800'}
               >
-                <td className="px-3 py-2 text-gray-200 font-medium">{row.ticker}</td>
-                <td className="px-3 py-2 text-gray-300">{row.portfolio}</td>
-                <td className="px-3 py-2 text-right text-gray-200 tabular-nums">
+                <td className="px-3 py-2 text-gray-800 dark:text-gray-200 font-medium">{row.ticker}</td>
+                <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{row.portfolio}</td>
+                <td className="px-3 py-2 text-right text-gray-800 dark:text-gray-200 tabular-nums">
                   {formatCurrency(row.marketValue, row.currency)}
                 </td>
                 <td className={`px-3 py-2 text-right tabular-nums ${colorClass(row.netReturn)}`}>

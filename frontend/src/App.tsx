@@ -11,10 +11,12 @@ import { Transaction, ComputeResult } from './types'
 import api from './api/client'
 import supabase from './api/supabase'
 import { computePortfolio } from './lib/computation'
+import { useTheme } from './lib/useTheme'
 
 const authEnabled = supabase !== null
 
 export default function App() {
+  const { theme, toggleTheme } = useTheme()
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('auth_token'))
   const [userEmail, setUserEmail] = useState<string | null>(() => localStorage.getItem('user_email'))
   const [transactions, setTransactions] = useState<Transaction[]>([])
@@ -250,32 +252,42 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100">
-      <header className="border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
+      <header className="border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between">
         <h1 className="text-xl font-semibold">Portfolio Returns Viz</h1>
-        {authEnabled && (
-          <div className="flex items-center gap-4">
-            {userEmail && <span className="text-sm text-gray-400">{userEmail}</span>}
-            <button
-              onClick={handleLogout}
-              className="text-sm text-gray-400 hover:text-white transition-colors"
-            >
-              Logout
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-4">
+          <button
+            onClick={toggleTheme}
+            className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          >
+            {theme === 'dark' ? '☀' : '☾'}
+          </button>
+          {authEnabled && (
+            <>
+              {userEmail && <span className="text-sm text-gray-600 dark:text-gray-400">{userEmail}</span>}
+              <button
+                onClick={handleLogout}
+                className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+              >
+                Logout
+              </button>
+            </>
+          )}
+        </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
         {transactions.length > 0 && (
           <>
             {computeError ? (
-              <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
-                <p className="text-rose-400 text-sm">{computeError}</p>
+              <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
+                <p className="text-rose-600 dark:text-rose-400 text-sm">{computeError}</p>
               </div>
             ) : !computeResult && isComputing ? (
-              <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
-                <div className="flex items-center justify-center gap-3 py-6 text-gray-400">
+              <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
+                <div className="flex items-center justify-center gap-3 py-6 text-gray-600 dark:text-gray-400">
                   <Spinner size={20} />
                   <span className="text-sm">Fetching prices and computing portfolio…</span>
                 </div>
@@ -283,7 +295,7 @@ export default function App() {
             ) : computeResult ? (
               <>
                 {computeResult.failed_tickers.length > 0 && (
-                  <div className="bg-gray-900 rounded-xl border border-gray-800 p-4 text-yellow-400 text-sm">
+                  <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4 text-yellow-600 dark:text-yellow-400 text-sm">
                     <p>Could not fetch prices for:</p>
                     <ul className="list-disc list-inside">
                       {computeResult.failed_tickers.map((t) => <li key={t}>{t}</li>)}
@@ -297,14 +309,14 @@ export default function App() {
         )}
 
         {isLoadingTransactions && transactions.length === 0 && (
-          <div className="flex items-center justify-center gap-3 py-8 text-gray-400">
+          <div className="flex items-center justify-center gap-3 py-8 text-gray-600 dark:text-gray-400">
             <Spinner size={20} />
             <span className="text-sm">Loading saved transactions…</span>
           </div>
         )}
 
         {!isLoadingTransactions && transactions.length === 0 && (
-          <div className="flex flex-col items-center justify-center gap-4 py-20 text-gray-400">
+          <div className="flex flex-col items-center justify-center gap-4 py-20 text-gray-600 dark:text-gray-400">
             <p className="text-sm">No transactions loaded.</p>
             <div className="flex items-center gap-3">
               <button
@@ -320,7 +332,7 @@ export default function App() {
                   setTransactions([emptyRow()])
                   setActiveTab('transactions')
                 }}
-                className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-100 rounded-lg text-sm font-medium transition-colors"
+                className="px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg text-sm font-medium transition-colors"
               >
                 Add transaction manually
               </button>

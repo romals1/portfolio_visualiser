@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Plot from 'react-plotly.js'
 import { ComputeResult } from '../types'
+import { useTheme } from '../lib/useTheme'
 
 type View = 'total' | 'by_symbol'
 type Metric = 'portfolio_value' | 'net_return' | 'rolling_return' | 'breakdown'
@@ -174,33 +175,39 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  const { theme } = useTheme()
+  const isDark = theme === 'dark'
+  const chartColors = isDark
+    ? { font: '#e5e7eb', grid: '#1f2937', line: '#374151', zero: '#6b7280' }
+    : { font: '#1f2937', grid: '#e5e7eb', line: '#d1d5db', zero: '#9ca3af' }
+
   const legendLayout = isNarrow
-    ? { bgcolor: 'rgba(0,0,0,0)', bordercolor: '#374151', orientation: 'h' as const, y: -0.25, x: 0, xanchor: 'left' as const, yanchor: 'top' as const }
-    : { bgcolor: 'rgba(0,0,0,0)', bordercolor: '#374151' }
+    ? { bgcolor: 'rgba(0,0,0,0)', bordercolor: chartColors.line, orientation: 'h' as const, y: -0.25, x: 0, xanchor: 'left' as const, yanchor: 'top' as const }
+    : { bgcolor: 'rgba(0,0,0,0)', bordercolor: chartColors.line }
 
   const shapes =
     showRolling || showNetReturn || showBreakdown
-      ? [{ type: 'line', x0: 0, x1: 1, xref: 'paper', y0: 0, y1: 0, line: { color: '#6b7280', width: 1, dash: 'dash' } }]
+      ? [{ type: 'line', x0: 0, x1: 1, xref: 'paper', y0: 0, y1: 0, line: { color: chartColors.zero, width: 1, dash: 'dash' } }]
       : []
 
   return (
-    <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
+    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
       <Plot
         data={traces}
         layout={{
           paper_bgcolor: 'transparent',
           plot_bgcolor: 'transparent',
-          font: { color: '#e5e7eb', family: 'ui-sans-serif, system-ui, sans-serif' },
+          font: { color: chartColors.font, family: 'ui-sans-serif, system-ui, sans-serif' },
           height: 500,
           margin: { t: 40, b: isNarrow && showLegend ? 120 : 40, l: 70, r: 20 },
           showlegend: showLegend,
           legend: legendLayout,
-          xaxis: { gridcolor: '#1f2937', linecolor: '#374151', tickcolor: '#374151' },
+          xaxis: { gridcolor: chartColors.grid, linecolor: chartColors.line, tickcolor: chartColors.line },
           yaxis: {
             title: { text: yTitle },
-            gridcolor: '#1f2937',
-            linecolor: '#374151',
-            tickcolor: '#374151',
+            gridcolor: chartColors.grid,
+            linecolor: chartColors.line,
+            tickcolor: chartColors.line,
             tickformat: showRolling ? '.0%' : undefined,
           },
           // eslint-disable-next-line @typescript-eslint/no-explicit-any

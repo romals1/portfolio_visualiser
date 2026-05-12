@@ -11,7 +11,7 @@ interface Props {
 
 export default function Tabs({ tabs, active, onChange }: Props) {
   return (
-    <div role="tablist" className="border-b border-gray-800 flex gap-1">
+    <div role="tablist" className="border-b border-gray-200 dark:border-gray-800 flex gap-1">
       {tabs.map((tab) => (
         <button
           key={tab.id}
@@ -20,8 +20,8 @@ export default function Tabs({ tabs, active, onChange }: Props) {
           onClick={() => onChange(tab.id)}
           className={
             active === tab.id
-              ? 'px-4 py-2 text-sm font-medium text-white border-b-2 border-blue-500 -mb-px transition-colors'
-              : 'px-4 py-2 text-sm font-medium text-gray-400 hover:text-gray-200 transition-colors'
+              ? 'px-4 py-2 text-sm font-medium text-gray-900 dark:text-white border-b-2 border-blue-500 -mb-px transition-colors'
+              : 'px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors'
           }
         >
           {tab.label}

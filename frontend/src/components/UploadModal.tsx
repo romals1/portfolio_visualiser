@@ -93,14 +93,14 @@ export default function UploadModal({ isOpen, onClose, onTransactionsParsed }: P
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-xl bg-gray-900 border border-gray-800 shadow-2xl"
+        className="w-full max-w-lg rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800">
-          <h2 className="text-base font-medium text-gray-100">Upload transactions</h2>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200 dark:border-gray-800">
+          <h2 className="text-base font-medium text-gray-900 dark:text-gray-100">Upload transactions</h2>
           <button
             onClick={onClose}
-            className="text-gray-500 hover:text-gray-200 text-lg leading-none"
+            className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 text-lg leading-none"
             aria-label="Close"
           >
             ✕
@@ -117,7 +117,7 @@ export default function UploadModal({ isOpen, onClose, onTransactionsParsed }: P
             onDrop={handleDrop}
             onClick={() => inputRef.current?.click()}
             className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-              dragging ? 'border-blue-500 bg-blue-500/10' : 'border-gray-700 hover:border-gray-500'
+              dragging ? 'border-blue-500 bg-blue-500/10' : 'border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500'
             }`}
           >
             <input
@@ -129,13 +129,13 @@ export default function UploadModal({ isOpen, onClose, onTransactionsParsed }: P
               onChange={handleChange}
             />
             {loading ? (
-              <div className="flex items-center justify-center gap-2 text-gray-400">
+              <div className="flex items-center justify-center gap-2 text-gray-600 dark:text-gray-400">
                 <Spinner size={18} />
                 <span>Parsing files…</span>
               </div>
             ) : (
               <>
-                <p className="text-gray-300 text-sm">Drop CSV files here or click to browse</p>
+                <p className="text-gray-700 dark:text-gray-300 text-sm">Drop CSV files here or click to browse</p>
                 <p className="text-xs text-gray-500 mt-1">
                   Supported: Superhero (AUS/US) · Interactive Brokers · Manual
                 </p>
@@ -147,22 +147,22 @@ export default function UploadModal({ isOpen, onClose, onTransactionsParsed }: P
             <p className="text-xs uppercase tracking-wide text-gray-500">Defaults (optional)</p>
 
             <div className="grid grid-cols-3 gap-3">
-              <label className="text-xs text-gray-400 space-y-1">
+              <label className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
                 <span>Portfolio</span>
                 <input
                   value={portfolioOverride}
                   onChange={(e) => setPortfolioOverride(e.target.value)}
                   placeholder="from filename"
-                  className="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-gray-600"
+                  className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded px-2 py-1 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-gray-400 dark:focus:border-gray-600"
                 />
               </label>
 
-              <label className="text-xs text-gray-400 space-y-1">
+              <label className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
                 <span>Market</span>
                 <select
                   value={exchangeOverride}
                   onChange={(e) => setExchangeOverride(e.target.value as ExchangeOpt)}
-                  className="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-gray-600"
+                  className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded px-2 py-1 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-gray-400 dark:focus:border-gray-600"
                 >
                   {EXCHANGE_OPTIONS.map((v) => (
                     <option key={v} value={v}>{v}</option>
@@ -170,12 +170,12 @@ export default function UploadModal({ isOpen, onClose, onTransactionsParsed }: P
                 </select>
               </label>
 
-              <label className="text-xs text-gray-400 space-y-1">
+              <label className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
                 <span>Currency</span>
                 <select
                   value={currencyOverride}
                   onChange={(e) => setCurrencyOverride(e.target.value as CurrencyOpt)}
-                  className="w-full bg-gray-950 border border-gray-800 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-gray-600"
+                  className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded px-2 py-1 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-gray-400 dark:focus:border-gray-600"
                 >
                   {CURRENCY_OPTIONS.map((v) => (
                     <option key={v} value={v}>{v}</option>
@@ -185,7 +185,7 @@ export default function UploadModal({ isOpen, onClose, onTransactionsParsed }: P
             </div>
           </div>
 
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         </div>
       </div>
     </div>

@@ -21,7 +21,7 @@ function formatPercent(value: number): string {
 }
 
 function getColorClass(value: number): string {
-  return value >= 0 ? 'text-emerald-400' : 'text-rose-400'
+  return value >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
 }
 
 interface Stats {
@@ -128,10 +128,10 @@ function StatCard({
   const primaryFormatted = showAbsolute
     ? formatCurrency(absoluteValue, currency)
     : formatPercent(percentValue)
-  const primaryColor = neutral ? 'text-gray-100' : getColorClass(primary)
+  const primaryColor = neutral ? 'text-gray-900 dark:text-gray-100' : getColorClass(primary)
 
   return (
-    <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
+    <div className="bg-gray-100 dark:bg-gray-800 rounded-lg border border-gray-300 dark:border-gray-700 p-4">
       <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">{title}</p>
       <p className={`text-3xl font-semibold ${primaryColor} mb-1`}>
         {primaryFormatted}
@@ -187,8 +187,8 @@ export default function PortfolioStats({ result }: Props) {
 
     if (dates.length < 2 || !pv.some((v) => v > 0)) {
       return (
-        <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-          <p className="text-gray-400 text-center py-8">Not enough data to compute statistics</p>
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
+          <p className="text-gray-600 dark:text-gray-400 text-center py-8">Not enough data to compute statistics</p>
         </div>
       )
     }
@@ -196,7 +196,7 @@ export default function PortfolioStats({ result }: Props) {
     const stats = computeStats(dates, pv, nr, display_currency)
 
     return (
-      <div className="bg-gray-900 rounded-xl border border-gray-800 p-4">
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
         <StatsRow stats={stats} currency={display_currency} />
       </div>
     )
@@ -209,9 +209,9 @@ export default function PortfolioStats({ result }: Props) {
 
         if (dates.length < 2 || !pv.some((v) => v > 0)) {
           return (
-            <div key={portName} className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-              <h3 className="text-sm font-medium text-gray-300 mb-4">{portName}</h3>
-              <p className="text-gray-400 text-center py-4">Not enough data to compute statistics</p>
+            <div key={portName} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">{portName}</h3>
+              <p className="text-gray-600 dark:text-gray-400 text-center py-4">Not enough data to compute statistics</p>
             </div>
           )
         }
@@ -219,8 +219,8 @@ export default function PortfolioStats({ result }: Props) {
         const stats = computeStats(dates, pv, nr, display_currency)
 
         return (
-          <div key={portName} className="bg-gray-900 rounded-xl border border-gray-800 p-4">
-            <h3 className="text-sm font-medium text-gray-300 mb-4">{portName}</h3>
+          <div key={portName} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
+            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">{portName}</h3>
             <StatsRow stats={stats} currency={display_currency} />
           </div>
         )

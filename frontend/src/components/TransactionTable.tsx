@@ -120,20 +120,20 @@ export default function TransactionTable({ transactions, onChange, onUpload }: P
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-sm font-medium text-gray-300">Transactions ({transactions.length} rows)</h2>
+        <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300">Transactions ({transactions.length} rows)</h2>
         <div className="flex items-center gap-3">
-          <button onClick={onUpload} className="text-xs text-blue-400 hover:text-blue-300">
+          <button onClick={onUpload} className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300">
             Upload CSV
           </button>
-          <button onClick={() => downloadCSV(transactions)} className="text-xs text-blue-400 hover:text-blue-300">
+          <button onClick={() => downloadCSV(transactions)} className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300">
             Download CSV
           </button>
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-gray-800">
+      <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-800">
         <table className="min-w-full text-sm">
-          <thead className="bg-gray-800 text-gray-400">
+          <thead className="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
             <tr>
               {COLUMNS.map(({ key, label }) => {
                 const arrow = sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
@@ -141,7 +141,7 @@ export default function TransactionTable({ transactions, onChange, onUpload }: P
                   <th
                     key={key}
                     onClick={() => toggleSort(key)}
-                    className="px-3 py-2 text-left font-medium whitespace-nowrap cursor-pointer select-none hover:text-white"
+                    className="px-3 py-2 text-left font-medium whitespace-nowrap cursor-pointer select-none hover:text-gray-900 dark:hover:text-white"
                   >
                     {label}{arrow}
                   </th>
@@ -156,7 +156,7 @@ export default function TransactionTable({ transactions, onChange, onUpload }: P
                     value={filters[key] ?? ''}
                     onChange={(e) => setFilter(key, e.target.value)}
                     placeholder="filter..."
-                    className="w-full bg-gray-900 text-gray-200 placeholder-gray-600 rounded px-1 py-0.5 text-xs font-normal focus:outline-none"
+                    className="w-full bg-white dark:bg-gray-900 text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 rounded px-1 py-0.5 text-xs font-normal focus:outline-none"
                     onClick={(e) => e.stopPropagation()}
                   />
                 </th>
@@ -164,25 +164,25 @@ export default function TransactionTable({ transactions, onChange, onUpload }: P
               <th className="pb-2" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-800">
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
             {sorted.map(({ row, originalIndex }, displayIndex) => (
               <tr
                 key={originalIndex}
-                className={(displayIndex % 2 === 0 ? 'bg-gray-950' : 'bg-gray-900') + ' hover:bg-gray-800'}
+                className={(displayIndex % 2 === 0 ? 'bg-gray-50 dark:bg-gray-950' : 'bg-white dark:bg-gray-900') + ' hover:bg-gray-200 dark:hover:bg-gray-800'}
               >
                 <td className="px-2 py-1">
                   <input
                     type="date"
                     value={row.date}
                     onChange={(e) => update(originalIndex, 'date', e.target.value)}
-                    className="bg-transparent text-gray-200 focus:outline-none w-36"
+                    className="bg-transparent text-gray-800 dark:text-gray-200 focus:outline-none w-36"
                   />
                 </td>
                 <td className="px-2 py-1">
                   <input
                     value={row.ticker}
                     onChange={(e) => update(originalIndex, 'ticker', e.target.value.toUpperCase())}
-                    className="bg-transparent text-gray-200 focus:outline-none w-20 uppercase"
+                    className="bg-transparent text-gray-800 dark:text-gray-200 focus:outline-none w-20 uppercase"
                     placeholder="AAPL"
                   />
                 </td>
@@ -190,7 +190,7 @@ export default function TransactionTable({ transactions, onChange, onUpload }: P
                   <select
                     value={row.action}
                     onChange={(e) => update(originalIndex, 'action', e.target.value)}
-                    className="bg-gray-800 text-gray-200 rounded px-1 focus:outline-none"
+                    className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded px-1 focus:outline-none"
                   >
                     {ACTIONS.map((a) => (
                       <option key={a}>{a}</option>
@@ -202,7 +202,7 @@ export default function TransactionTable({ transactions, onChange, onUpload }: P
                     type="number"
                     value={row.quantity}
                     onChange={(e) => update(originalIndex, 'quantity', Number(e.target.value))}
-                    className="bg-transparent text-gray-200 focus:outline-none w-24"
+                    className="bg-transparent text-gray-800 dark:text-gray-200 focus:outline-none w-24"
                     min={0}
                   />
                 </td>
@@ -211,7 +211,7 @@ export default function TransactionTable({ transactions, onChange, onUpload }: P
                     type="number"
                     value={row.price}
                     onChange={(e) => update(originalIndex, 'price', Number(e.target.value))}
-                    className="bg-transparent text-gray-200 focus:outline-none w-24"
+                    className="bg-transparent text-gray-800 dark:text-gray-200 focus:outline-none w-24"
                     min={0}
                     step="0.0001"
                   />
@@ -221,7 +221,7 @@ export default function TransactionTable({ transactions, onChange, onUpload }: P
                     type="number"
                     value={row.fees}
                     onChange={(e) => update(originalIndex, 'fees', Number(e.target.value))}
-                    className="bg-transparent text-gray-200 focus:outline-none w-20"
+                    className="bg-transparent text-gray-800 dark:text-gray-200 focus:outline-none w-20"
                     min={0}
                     step="0.01"
                   />
@@ -230,7 +230,7 @@ export default function TransactionTable({ transactions, onChange, onUpload }: P
                   <select
                     value={row.exchange}
                     onChange={(e) => update(originalIndex, 'exchange', e.target.value)}
-                    className="bg-gray-800 text-gray-200 rounded px-1 focus:outline-none"
+                    className="bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded px-1 focus:outline-none"
                   >
                     {EXCHANGES.map((ex) => (
                       <option key={ex}>{ex}</option>
@@ -241,13 +241,13 @@ export default function TransactionTable({ transactions, onChange, onUpload }: P
                   <input
                     value={row.portfolio}
                     onChange={(e) => update(originalIndex, 'portfolio', e.target.value)}
-                    className="bg-transparent text-gray-200 focus:outline-none w-28"
+                    className="bg-transparent text-gray-800 dark:text-gray-200 focus:outline-none w-28"
                   />
                 </td>
                 <td className="px-2 py-1">
                   <button
                     onClick={() => deleteRow(originalIndex)}
-                    className="text-gray-600 hover:text-red-400 text-xs"
+                    className="text-gray-400 dark:text-gray-600 hover:text-red-600 dark:hover:text-red-400 text-xs"
                   >
                     ✕
                   </button>
@@ -256,8 +256,8 @@ export default function TransactionTable({ transactions, onChange, onUpload }: P
             ))}
           </tbody>
         </table>
-        <div className="px-3 py-2 bg-gray-900 border-t border-gray-800">
-          <button onClick={addRow} className="text-sm text-blue-400 hover:text-blue-300">
+        <div className="px-3 py-2 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
+          <button onClick={addRow} className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300">
             + Add row
           </button>
         </div>

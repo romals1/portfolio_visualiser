@@ -34,7 +34,7 @@ function RadioGroup<T extends string>({
             className={`px-3 py-1 text-sm rounded-lg transition-colors ${
               value === o.value
                 ? 'bg-blue-600 text-white'
-                : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-700'
             }`}
           >
             {o.label}
@@ -75,7 +75,7 @@ export default function ChartArea({ computeResult, isComputing, benchmarkTickers
 
   return (
     <div className="space-y-6">
-      <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 space-y-5">
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 space-y-5">
         <h2 className="text-lg font-medium">Chart controls</h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -126,12 +126,12 @@ export default function ChartArea({ computeResult, isComputing, benchmarkTickers
             value={benchmarkInput}
             onChange={handleBenchmarkChange}
             placeholder="Yahoo Finance tickers, comma-separated — e.g. ^AXJO, ^GSPC"
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+            className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-500"
           />
         </div>
 
         {isComputing && (
-          <div className="flex items-center gap-2 text-sm text-gray-400">
+          <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
             <Spinner size={14} />
             <span>Fetching prices and computing portfolio…</span>
           </div>
@@ -140,7 +140,7 @@ export default function ChartArea({ computeResult, isComputing, benchmarkTickers
         {computeResult && computeResult.failed_tickers.length > 0 && (
           <button
             onClick={() => { onClearCache() }}
-            className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm"
+            className="bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-900 dark:text-white px-4 py-2 rounded-lg text-sm"
           >
             Retry fetching prices
           </button>
