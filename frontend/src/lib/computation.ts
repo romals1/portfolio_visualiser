@@ -61,6 +61,16 @@ function fxOnAxis(fxData: PriceData, axis: string[]): number[] {
   return forward.map(v => (Number.isFinite(v) ? v : firstReal))
 }
 
+// Most recent (non-zero, finite) FX value — used as the static "today's
+// rate" scalar for computing the pure (no-FX-P&L) return series.
+function latestFxRate(fxData: PriceData): number {
+  for (let i = fxData.values.length - 1; i >= 0; i--) {
+    const v = fxData.values[i]
+    if (Number.isFinite(v) && v > 0) return v
+  }
+  return 1
+}
+
 function alignToAxis(
   events: { date: string; value: number }[],
   axis: string[]
@@ -124,7 +134,8 @@ function sumDataFrames(parts: Record<string, number[]>[]): Record<string, number
 
 export async function computePortfolio(
   transactions: Transaction[],
-  benchmarkTickers: string[] = []
+  benchmarkTickers: string[] = [],
+  displayCurrency: 'USD' | 'AUD' = 'USD'
 ): Promise<ComputeResult> {
   const empty: ComputeResult = {
     dates: [],
@@ -132,7 +143,10 @@ export async function computePortfolio(
     net_return: [],
     capital_return: [],
     dividend_return: [],
-    display_currency: 'USD',
+    capital_return_pure: [],
+    dividend_return_pure: [],
+    fx_return: [],
+    display_currency: displayCurrency,
     symbols: {},
     benchmarks: {},
     failed_tickers: [],
@@ -169,8 +183,10 @@ export async function computePortfolio(
     for (const txn of tradeRows) {
       allTickersToFetch.add(`${exchange}:${txn.ticker}`)
     }
-    if (currency !== 'USD' && FX_SYMBOLS[currency]) {
-      fxCurrenciesNeeded.add(currency)
+    // FX needed whenever native currency differs from display currency.
+    // We only have AUDUSD=X, so any AUD/USD pairing routes through it.
+    if (currency !== displayCurrency && (currency === 'AUD' || displayCurrency === 'AUD')) {
+      fxCurrenciesNeeded.add('AUD')
     }
   }
 
@@ -225,10 +241,16 @@ export async function computePortfolio(
   const nrParts: number[][] = []
   const crParts: number[][] = []
   const drParts: number[][] = []
+  const crPureParts: number[][] = []
+  const drPureParts: number[][] = []
+  const fxRetParts: number[][] = []
   const svParts: Record<string, number[]>[] = []
   const snrParts: Record<string, number[]>[] = []
   const scrParts: Record<string, number[]>[] = []
   const sdcParts: Record<string, number[]>[] = []
+  const scrPureParts: Record<string, number[]>[] = []
+  const sdcPureParts: Record<string, number[]>[] = []
+  const sfxRetParts: Record<string, number[]>[] = []
   let allSortedDates: string[] = []
 
   for (const [currency, currencyTxns] of currencyMap) {
@@ -255,15 +277,16 @@ export async function computePortfolio(
       continue
     }
 
-    // FX series → USD. USD currency uses an all-ones array.
+    // FX conversion factor: native → displayCurrency on each axis date.
+    // We only have AUDUSD=X; USD→AUD just inverts it.
     let fxFeed: PriceData | null = null
-    if (currency !== 'USD') {
-      const fxSym = FX_SYMBOLS[currency]
-      if (!fxSym || !fxData[currency]) {
-        fetchFailures.push(`${currency}: missing FX rate ${fxSym ?? '?'}`)
+    const needsFx = currency !== displayCurrency
+    if (needsFx) {
+      if (!fxData['AUD']) {
+        fetchFailures.push(`${currency}: missing FX rate ${FX_SYMBOLS['AUD']}`)
         continue
       }
-      fxFeed = fxData[currency]
+      fxFeed = fxData['AUD']
     }
 
     const allDates = new Set<string>()
@@ -272,9 +295,24 @@ export async function computePortfolio(
     }
     const sortedDates = Array.from(allDates).sort()
 
-    const fxAxis: number[] = fxFeed
-      ? fxOnAxis(fxFeed, sortedDates)
-      : new Array(sortedDates.length).fill(1)
+    // fxAxis: per-bar native→display rate, used for actual display values.
+    // fxToday: scalar for the "pure" (FX-stripped) series at today's rate.
+    let fxAxis: number[]
+    let fxToday: number
+    if (!needsFx) {
+      fxAxis = new Array(sortedDates.length).fill(1)
+      fxToday = 1
+    } else {
+      const audUsd = fxOnAxis(fxFeed!, sortedDates)
+      const todayAudUsd = latestFxRate(fxFeed!)
+      if (currency === 'AUD') {
+        fxAxis = audUsd
+        fxToday = todayAudUsd
+      } else {
+        fxAxis = audUsd.map(v => 1 / v)
+        fxToday = 1 / todayAudUsd
+      }
+    }
 
     const prices: Record<string, number[]> = {}
     for (const ticker of tickers) {
@@ -294,25 +332,19 @@ export async function computePortfolio(
       positions[ticker] = cumsum(aligned)
     }
 
-    // Position value in USD: shares × native price × FX(date)
-    const symbolValues: Record<string, number[]> = {}
+    // Per-bar native amounts (no FX). Trade and dividend cashflows are kept
+    // as per-bar increments (not yet cumulative) so we can scale them by
+    // either fxAxis (per-bar) or fxToday (static) and then cumsum.
+    const tradeBarNative: Record<string, number[]> = {}
+    const divBarNative: Record<string, number[]> = {}
     for (const ticker of tickers) {
-      symbolValues[ticker] = positions[ticker].map(
-        (pos, i) => pos * prices[ticker][i] * fxAxis[i]
-      )
-    }
+      const cfEvents = currencyTxns
+        .filter(t => t.ticker === ticker && ['BUY', 'SELL'].includes(t.action))
+        .map(t => ({ date: t.date, value: t.net_amount }))
+      tradeBarNative[ticker] = alignToAxis(cfEvents, sortedDates)
 
-    const portfolioValue = symbolValues[tickers[0]].map((_, i) => {
-      return tickers.reduce((sum, t) => sum + (symbolValues[t][i] || 0), 0)
-    })
-
-    // Per-symbol dividend cashflows in USD: shares × per-share native ×
-    // FX rate on the aligned bar's date. yfinance is the authoritative
-    // dividend source — user CSV DIV rows are ignored.
-    const symbolDivCashflows: Record<string, number[]> = {}
-    for (const ticker of tickers) {
       const divFeed = allDividendsData[ticker]
-      const aligned = new Array(sortedDates.length).fill(0)
+      const divAligned = new Array(sortedDates.length).fill(0)
       if (divFeed) {
         const dateToIdx = new Map(sortedDates.map((d, i) => [d, i]))
         for (let k = 0; k < divFeed.dates.length; k++) {
@@ -325,59 +357,86 @@ export async function computePortfolio(
           }
           const shares = positions[ticker][idx] ?? 0
           if (shares <= 0) continue
-          aligned[idx] += shares * perShare * fxAxis[idx]
+          divAligned[idx] += shares * perShare
         }
       }
-      symbolDivCashflows[ticker] = cumsum(aligned)
+      divBarNative[ticker] = divAligned
     }
 
-    // Trade cashflows in USD: net_amount on each trade date × FX on that
-    // axis date. Converting at the time the cashflow happened (not at the
-    // current FX rate) preserves the historical USD value of the cashflow.
+    // Native cumulative position value and cashflows (no FX applied).
+    const pvNative: Record<string, number[]> = {}
+    const tradeCfNative: Record<string, number[]> = {}
+    const divCfNative: Record<string, number[]> = {}
+    for (const ticker of tickers) {
+      pvNative[ticker] = positions[ticker].map((pos, i) => pos * prices[ticker][i])
+      tradeCfNative[ticker] = cumsum(tradeBarNative[ticker])
+      divCfNative[ticker] = cumsum(divBarNative[ticker])
+    }
+
+    // Display series (per-bar FX): true display-currency value of the
+    // position at each bar, with each cashflow converted at the FX rate
+    // on its own date. This captures real FX P&L over the holding period.
+    const symbolValues: Record<string, number[]> = {}
     const symbolTradeCashflows: Record<string, number[]> = {}
+    const symbolDivCashflows: Record<string, number[]> = {}
     for (const ticker of tickers) {
-      const cfEvents = currencyTxns
-        .filter(t => t.ticker === ticker && ['BUY', 'SELL'].includes(t.action))
-        .map(t => ({
-          date: t.date,
-          value: t.net_amount,
-        }))
-      const alignedNative = alignToAxis(cfEvents, sortedDates)
-      const alignedUsd = alignedNative.map((v, i) => v * fxAxis[i])
-      symbolTradeCashflows[ticker] = cumsum(alignedUsd)
-    }
-
-    const symbolCashflows: Record<string, number[]> = {}
-    for (const ticker of tickers) {
-      symbolCashflows[ticker] = symbolTradeCashflows[ticker].map(
-        (v, i) => v + (symbolDivCashflows[ticker][i] || 0)
-      )
+      symbolValues[ticker] = pvNative[ticker].map((v, i) => v * fxAxis[i])
+      symbolTradeCashflows[ticker] = cumsum(tradeBarNative[ticker].map((v, i) => v * fxAxis[i]))
+      symbolDivCashflows[ticker] = cumsum(divBarNative[ticker].map((v, i) => v * fxAxis[i]))
     }
 
     const symbolNetReturns: Record<string, number[]> = {}
-    for (const ticker of tickers) {
-      symbolNetReturns[ticker] = symbolValues[ticker].map((v, i) => v + (symbolCashflows[ticker][i] || 0))
-    }
-
-    const totalCashflows = sortedDates.map((_, i) => tickers.reduce((sum, t) => sum + (symbolCashflows[t][i] || 0), 0))
-    const netReturn = portfolioValue.map((pv, i) => pv + totalCashflows[i])
-
     const symbolCapitalReturns: Record<string, number[]> = {}
     for (const ticker of tickers) {
-      symbolCapitalReturns[ticker] = symbolNetReturns[ticker].map((nr, i) => nr - (symbolDivCashflows[ticker][i] || 0))
+      symbolNetReturns[ticker] = symbolValues[ticker].map(
+        (v, i) => v + (symbolTradeCashflows[ticker][i] || 0) + (symbolDivCashflows[ticker][i] || 0),
+      )
+      symbolCapitalReturns[ticker] = symbolNetReturns[ticker].map(
+        (nr, i) => nr - (symbolDivCashflows[ticker][i] || 0),
+      )
     }
 
-    const totalDivCashflows = sortedDates.map((_, i) => tickers.reduce((sum, t) => sum + (symbolDivCashflows[t][i] || 0), 0))
-    const capitalReturn = netReturn.map((nr, i) => nr - totalDivCashflows[i])
+    // Pure series (static today-FX): instrument-only return, with FX
+    // applied as a single uniform scalar. The difference between the
+    // per-bar and pure series is attributed to fx_return below.
+    const symbolCapitalReturnsPure: Record<string, number[]> = {}
+    const symbolDivCashflowsPure: Record<string, number[]> = {}
+    const symbolFxReturns: Record<string, number[]> = {}
+    for (const ticker of tickers) {
+      symbolCapitalReturnsPure[ticker] = pvNative[ticker].map(
+        (v, i) => (v + tradeCfNative[ticker][i]) * fxToday,
+      )
+      symbolDivCashflowsPure[ticker] = divCfNative[ticker].map(v => v * fxToday)
+      symbolFxReturns[ticker] = symbolNetReturns[ticker].map(
+        (nr, i) => nr - symbolCapitalReturnsPure[ticker][i] - symbolDivCashflowsPure[ticker][i],
+      )
+    }
+
+    const sumOver = (per: Record<string, number[]>): number[] =>
+      sortedDates.map((_, i) => tickers.reduce((s, t) => s + (per[t][i] || 0), 0))
+
+    const portfolioValue = sumOver(symbolValues)
+    const netReturn = sumOver(symbolNetReturns)
+    const capitalReturn = sumOver(symbolCapitalReturns)
+    const totalDivCashflows = sumOver(symbolDivCashflows)
+    const capitalReturnPure = sumOver(symbolCapitalReturnsPure)
+    const totalDivCashflowsPure = sumOver(symbolDivCashflowsPure)
+    const fxReturn = sumOver(symbolFxReturns)
 
     pvParts.push(portfolioValue)
     nrParts.push(netReturn)
     crParts.push(capitalReturn)
     drParts.push(totalDivCashflows)
+    crPureParts.push(capitalReturnPure)
+    drPureParts.push(totalDivCashflowsPure)
+    fxRetParts.push(fxReturn)
     svParts.push(symbolValues)
     snrParts.push(symbolNetReturns)
     scrParts.push(symbolCapitalReturns)
     sdcParts.push(symbolDivCashflows)
+    scrPureParts.push(symbolCapitalReturnsPure)
+    sdcPureParts.push(symbolDivCashflowsPure)
+    sfxRetParts.push(symbolFxReturns)
     allSortedDates = sortedDates
   }
 
@@ -389,6 +448,9 @@ export async function computePortfolio(
   const snr = sumDataFrames(snrParts)
   const scr = sumDataFrames(scrParts)
   const sdc = sumDataFrames(sdcParts)
+  const scrPure = sumDataFrames(scrPureParts)
+  const sdcPure = sumDataFrames(sdcPureParts)
+  const sfx = sumDataFrames(sfxRetParts)
 
   const symbols: Record<string, SymbolData> = {}
   for (const ticker of Object.keys(sv)) {
@@ -397,6 +459,9 @@ export async function computePortfolio(
       net_return: snr[ticker] || [],
       capital_return: scr[ticker] || [],
       div_cashflow: sdc[ticker] || [],
+      capital_return_pure: scrPure[ticker] || [],
+      div_cashflow_pure: sdcPure[ticker] || [],
+      fx_return: sfx[ticker] || [],
     }
   }
 
@@ -428,7 +493,10 @@ export async function computePortfolio(
     net_return: sumSeries(nrParts),
     capital_return: sumSeries(crParts),
     dividend_return: sumSeries(drParts),
-    display_currency: 'USD',
+    capital_return_pure: sumSeries(crPureParts),
+    dividend_return_pure: sumSeries(drPureParts),
+    fx_return: sumSeries(fxRetParts),
+    display_currency: displayCurrency,
     symbols,
     benchmarks: benchmarkData,
     failed_tickers: fetchFailures,

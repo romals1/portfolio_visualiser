@@ -52,12 +52,12 @@ Thin API for price fetching and CSV parsing. One-way pipeline: routers call serv
 - **`components/TransactionTable.tsx`** — controlled editable table; add/delete rows, CSV download.
 - **`components/ChartArea.tsx`** — chart controls (view, metric, range, rolling window, benchmarks) + Compute button.
 - **`components/PortfolioChart.tsx`** — Plotly chart. Rolling annualised return is computed client-side. Benchmark prices are scaled to the first portfolio's initial value.
-- **`lib/computation.ts`** — core portfolio computation engine: groups transactions by portfolio/currency, batches price fetch via `/api/prices` (also fetching `AUDUSD=X` for any non-USD currency in the transactions), aligns cashflows to price-bar dates using `alignToAxis()`, applies per-date FX to convert native-currency positions / cashflows / dividends to USD, then aggregates. Returns all symbol-level data in USD.
+- **`lib/computation.ts`** — core portfolio computation engine: groups transactions by portfolio/currency, batches price fetch via `/api/prices` (also fetching `AUDUSD=X` whenever native and display currencies differ), aligns cashflows to price-bar dates using `alignToAxis()`, and applies per-date FX to convert native-currency positions / cashflows / dividends into the user-selected display currency. Result includes both the per-bar series (`capital_return`, `dividend_return`) and a "pure" decomposition (`capital_return_pure`, `dividend_return_pure`, `fx_return`) computed at a single static today's-FX scalar — these three sum to `net_return` and let the breakdown chart show instrument P&L separately from FX P&L. `displayCurrency` is a parameter; result is tagged with it.
 - **`api/client.ts`** — axios instance; attaches `Authorization: Bearer <token>` from localStorage on every request.
 
 ### Data contract
 
-- Transactions DataFrame columns: `date` (tz-naive datetime64), `ticker` / `action` (uppercase str), `quantity` (abs float), `price`, `fees` (default 0.0), `exchange` ("ASX"/"US"), `currency` ("AUD"/"USD"), `net_amount`. `price`, `fees`, and `net_amount` are in the trade's native currency — FX conversion to USD happens client-side at compute time.
+- Transactions DataFrame columns: `date` (tz-naive datetime64), `ticker` / `action` (uppercase str), `quantity` (abs float), `price`, `fees` (default 0.0), `exchange` ("ASX"/"US"), `currency` ("AUD"/"USD"), `net_amount`. `price`, `fees`, and `net_amount` are in the trade's native currency — FX conversion to the display currency happens client-side at compute time.
 - Prices/dividends DataFrames: tz-naive DatetimeIndex, one column per ticker symbol, values in the ticker's local currency.
 
 ### Input CSV format

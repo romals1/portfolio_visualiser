@@ -63,7 +63,17 @@ function applyRange<T>(
 }
 
 export default function PortfolioChart({ result, view, metric, range, rollingWindow }: Props) {
-  const { dates, portfolio_value: pv, net_return: nr, capital_return: cr, dividend_return: dr, symbols, display_currency, benchmarks } = result
+  const {
+    dates,
+    portfolio_value: pv,
+    net_return: nr,
+    capital_return_pure: crPure,
+    dividend_return_pure: drPure,
+    fx_return: fxRet,
+    symbols,
+    display_currency,
+    benchmarks,
+  } = result
   const cutoff = cutoffForRange(range)
 
   const showRolling = metric === 'rolling_return'
@@ -87,9 +97,15 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
       traces.push({ x: fd, y: fv, mode: 'lines', name: 'Portfolio', hovertemplate: `%{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
     }
   } else if (showBreakdown) {
+    // Breakdown decomposes net return into three components that sum to it:
+    //   capital_return_pure + dividend_return_pure + fx_return = net_return
     if (bySymbol) {
       for (const [ticker, sym] of Object.entries(symbols)) {
-        for (const [suffix, vals] of [['cap', sym.capital_return], ['div', sym.div_cashflow]] as [string, number[]][]) {
+        for (const [suffix, vals] of [
+          ['cap', sym.capital_return_pure],
+          ['div', sym.div_cashflow_pure],
+          ['fx', sym.fx_return],
+        ] as [string, number[]][]) {
           if (!vals.some((v) => Math.abs(v) > 0)) continue
           const label = `${ticker} — ${suffix}`
           const [fd, fv] = applyRange(dates, vals, cutoff)
@@ -97,7 +113,11 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
         }
       }
     } else {
-      for (const [labelSuffix, vals] of [['Capital gains', cr], ['Dividends', dr]] as [string, number[]][]) {
+      for (const [labelSuffix, vals] of [
+        ['Capital gains', crPure],
+        ['Dividends', drPure],
+        ['FX return', fxRet],
+      ] as [string, number[]][]) {
         if (!vals.some((v) => Math.abs(v) > 0)) continue
         const [fd, fv] = applyRange(dates, vals, cutoff)
         traces.push({ x: fd, y: fv, mode: 'lines', name: labelSuffix, hovertemplate: `${labelSuffix} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })

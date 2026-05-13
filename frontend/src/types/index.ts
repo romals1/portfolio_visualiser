@@ -14,6 +14,9 @@ export interface SymbolData {
   net_return: number[]
   capital_return: number[]
   div_cashflow: number[]
+  capital_return_pure: number[]
+  div_cashflow_pure: number[]
+  fx_return: number[]
 }
 
 export interface BenchmarkData {
@@ -27,6 +30,9 @@ export interface ComputeResult {
   net_return: number[]
   capital_return: number[]
   dividend_return: number[]
+  capital_return_pure: number[]
+  dividend_return_pure: number[]
+  fx_return: number[]
   display_currency: string
   symbols: Record<string, SymbolData>
   benchmarks: Record<string, BenchmarkData>

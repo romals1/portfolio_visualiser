@@ -25,6 +25,9 @@ export default function App() {
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(false)
   const [computeError, setComputeError] = useState<string | null>(null)
   const [benchmarkTickers, setBenchmarkTickers] = useState<string[]>([])
+  const [displayCurrency, setDisplayCurrency] = useState<'USD' | 'AUD'>(
+    () => (localStorage.getItem('display_currency') as 'USD' | 'AUD') || 'USD',
+  )
   const [activeTab, setActiveTab] = useState<'transactions' | 'holdings' | 'chart'>('transactions')
   const [uploadOpen, setUploadOpen] = useState(false)
   const computeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -71,13 +74,13 @@ export default function App() {
     setComputeError(null)
   }
 
-  const performCompute = async (txns: Transaction[], benchmarks: string[]) => {
+  const performCompute = async (txns: Transaction[], benchmarks: string[], currency: 'USD' | 'AUD') => {
     if (txns.length === 0) return
     const requestId = ++computeRequestIdRef.current
     setIsComputing(true)
     setComputeError(null)
     try {
-      const result = await computePortfolio(txns, benchmarks)
+      const result = await computePortfolio(txns, benchmarks, currency)
       if (requestId !== computeRequestIdRef.current) return
       setComputeResult(result)
     } catch (err: unknown) {
@@ -93,6 +96,11 @@ export default function App() {
         setIsComputing(false)
       }
     }
+  }
+
+  const handleDisplayCurrencyChange = (currency: 'USD' | 'AUD') => {
+    localStorage.setItem('display_currency', currency)
+    setDisplayCurrency(currency)
   }
 
   const handleClearCache = async () => {
@@ -112,7 +120,7 @@ export default function App() {
     }
 
     computeTimeoutRef.current = setTimeout(() => {
-      performCompute(transactions, benchmarkTickers)
+      performCompute(transactions, benchmarkTickers, displayCurrency)
     }, 500)
 
     return () => {
@@ -120,7 +128,7 @@ export default function App() {
         clearTimeout(computeTimeoutRef.current)
       }
     }
-  }, [transactions, benchmarkTickers])
+  }, [transactions, benchmarkTickers, displayCurrency])
 
   // Load transactions on mount when token is available
   useEffect(() => {
@@ -254,6 +262,26 @@ export default function App() {
       <header className="border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between">
         <h1 className="text-xl font-semibold">Portfolio Returns Viz</h1>
         <div className="flex items-center gap-4">
+          <div
+            className="flex items-center text-xs rounded-md border border-gray-300 dark:border-gray-700 overflow-hidden"
+            role="group"
+            aria-label="Display currency"
+          >
+            {(['USD', 'AUD'] as const).map((c) => (
+              <button
+                key={c}
+                onClick={() => handleDisplayCurrencyChange(c)}
+                className={`px-2 py-1 transition-colors ${
+                  displayCurrency === c
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                }`}
+                aria-pressed={displayCurrency === c}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
           <button
             onClick={toggleTheme}
             className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
