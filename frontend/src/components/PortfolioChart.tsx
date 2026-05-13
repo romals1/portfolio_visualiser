@@ -63,9 +63,7 @@ function applyRange<T>(
 }
 
 export default function PortfolioChart({ result, view, metric, range, rollingWindow }: Props) {
-  const { portfolios, benchmarks } = result
-  const portfolioNames = Object.keys(portfolios)
-  const multiPortfolio = portfolioNames.length > 1
+  const { dates, portfolio_value: pv, net_return: nr, capital_return: cr, dividend_return: dr, symbols, display_currency, benchmarks } = result
   const cutoff = cutoffForRange(range)
 
   const showRolling = metric === 'rolling_return'
@@ -76,64 +74,52 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const traces: any[] = []
 
-  for (const [portName, grp] of Object.entries(portfolios)) {
-    const { dates, portfolio_value: pv, net_return: nr, capital_return: cr, dividend_return: dr, symbols, display_currency } = grp
-
-    if (showRolling) {
-      if (bySymbol) {
-        for (const [ticker, sym] of Object.entries(symbols)) {
-          const rolling = rollingAnnReturn(sym.net_return, sym.value, rollingWindow)
-          const label = multiPortfolio ? `${portName} — ${ticker}` : ticker
-          const [fd, fv] = applyRange(dates, rolling, cutoff)
-          traces.push({ x: fd, y: fv, mode: 'lines', name: label, hovertemplate: `${label} %{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
-        }
-      } else {
-        const rolling = rollingAnnReturn(nr, pv, rollingWindow)
+  if (showRolling) {
+    if (bySymbol) {
+      for (const [ticker, sym] of Object.entries(symbols)) {
+        const rolling = rollingAnnReturn(sym.net_return, sym.value, rollingWindow)
         const [fd, fv] = applyRange(dates, rolling, cutoff)
-        traces.push({ x: fd, y: fv, mode: 'lines', name: portName, hovertemplate: `${portName} %{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
+        traces.push({ x: fd, y: fv, mode: 'lines', name: ticker, hovertemplate: `${ticker} %{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
       }
-    } else if (showBreakdown) {
-      if (bySymbol) {
-        for (const [ticker, sym] of Object.entries(symbols)) {
-          for (const [suffix, vals] of [['cap', sym.capital_return], ['div', sym.div_cashflow]] as [string, number[]][]) {
-            if (!vals.some((v) => Math.abs(v) > 0)) continue
-            const label = multiPortfolio ? `${portName} — ${ticker} (${suffix})` : `${ticker} — ${suffix}`
-            const [fd, fv] = applyRange(dates, vals, cutoff)
-            traces.push({ x: fd, y: fv, mode: 'lines', name: label, hovertemplate: `${label} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
-          }
-        }
-      } else {
-        for (const [labelSuffix, vals] of [['Capital gains', cr], ['Dividends', dr]] as [string, number[]][]) {
+    } else {
+      const rolling = rollingAnnReturn(nr, pv, rollingWindow)
+      const [fd, fv] = applyRange(dates, rolling, cutoff)
+      traces.push({ x: fd, y: fv, mode: 'lines', name: 'Portfolio', hovertemplate: `%{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
+    }
+  } else if (showBreakdown) {
+    if (bySymbol) {
+      for (const [ticker, sym] of Object.entries(symbols)) {
+        for (const [suffix, vals] of [['cap', sym.capital_return], ['div', sym.div_cashflow]] as [string, number[]][]) {
           if (!vals.some((v) => Math.abs(v) > 0)) continue
-          const label = multiPortfolio ? `${portName} — ${labelSuffix}` : labelSuffix
+          const label = `${ticker} — ${suffix}`
           const [fd, fv] = applyRange(dates, vals, cutoff)
           traces.push({ x: fd, y: fv, mode: 'lines', name: label, hovertemplate: `${label} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
         }
       }
-    } else if (bySymbol) {
-      for (const [ticker, sym] of Object.entries(symbols)) {
-        const vals = showNetReturn ? sym.net_return : sym.value
-        const label = multiPortfolio ? `${portName} — ${ticker}` : ticker
-        const [fd, fv] = applyRange(dates, vals, cutoff)
-        traces.push({ x: fd, y: fv, mode: 'lines', name: label, hovertemplate: `${label} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
-      }
     } else {
-      const vals = showNetReturn ? nr : pv
-      const [fd, fv] = applyRange(dates, vals, cutoff)
-      traces.push({ x: fd, y: fv, mode: 'lines', name: portName, hovertemplate: `%{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
+      for (const [labelSuffix, vals] of [['Capital gains', cr], ['Dividends', dr]] as [string, number[]][]) {
+        if (!vals.some((v) => Math.abs(v) > 0)) continue
+        const [fd, fv] = applyRange(dates, vals, cutoff)
+        traces.push({ x: fd, y: fv, mode: 'lines', name: labelSuffix, hovertemplate: `${labelSuffix} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
+      }
     }
+  } else if (bySymbol) {
+    for (const [ticker, sym] of Object.entries(symbols)) {
+      const vals = showNetReturn ? sym.net_return : sym.value
+      const [fd, fv] = applyRange(dates, vals, cutoff)
+      traces.push({ x: fd, y: fv, mode: 'lines', name: ticker, hovertemplate: `${ticker} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
+    }
+  } else {
+    const vals = showNetReturn ? nr : pv
+    const [fd, fv] = applyRange(dates, vals, cutoff)
+    traces.push({ x: fd, y: fv, mode: 'lines', name: 'Portfolio', hovertemplate: `%{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
   }
 
   // Benchmark overlays (skip in breakdown mode)
   if (!showBreakdown) {
-    const firstGrp = Object.values(portfolios)[0]
-    const firstPV = firstGrp?.portfolio_value ?? []
-    const firstDates = firstGrp?.dates ?? []
-    const currency = firstGrp?.display_currency ?? 'USD'
-
-    const firstNonZeroIdx = firstPV.findIndex((v) => v > 0)
-    const tRef = firstNonZeroIdx >= 0 ? firstDates[firstNonZeroIdx] : null
-    const pvRef = firstNonZeroIdx >= 0 ? firstPV[firstNonZeroIdx] : null
+    const firstNonZeroIdx = pv.findIndex((v) => v > 0)
+    const tRef = firstNonZeroIdx >= 0 ? dates[firstNonZeroIdx] : null
+    const pvRef = firstNonZeroIdx >= 0 ? pv[firstNonZeroIdx] : null
 
     for (const [bm, bmData] of Object.entries(benchmarks)) {
       if (!bmData.dates.length) continue
@@ -149,22 +135,19 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
         const scaled = bmData.values.map((v) => (v / bmRef) * pvRef)
         const adjusted = showNetReturn ? scaled.map((v) => v - pvRef) : scaled
         const [fd, fv] = applyRange(bmData.dates, adjusted, cutoff)
-        traces.push({ x: fd, y: fv, mode: 'lines', name: bm, line: { dash: 'dash' }, hovertemplate: `${bm} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${currency}<extra></extra>` })
+        traces.push({ x: fd, y: fv, mode: 'lines', name: bm, line: { dash: 'dash' }, hovertemplate: `${bm} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
       }
     }
   }
 
-  const firstGrp = Object.values(portfolios)[0]
-  const dispCurrency = firstGrp?.display_currency ?? 'USD'
-
   const yTitle = showRolling
     ? 'Annualised return'
     : showBreakdown || showNetReturn
-    ? `Return ($ ${dispCurrency})`
-    : `Value ($ ${dispCurrency})`
+    ? `Return ($ ${display_currency})`
+    : `Value ($ ${display_currency})`
 
   const showLegend =
-    multiPortfolio || bySymbol || showRolling || showBreakdown || Object.keys(benchmarks).length > 0
+    bySymbol || showRolling || showBreakdown || Object.keys(benchmarks).length > 0
 
   const [isNarrow, setIsNarrow] = useState(
     typeof window !== 'undefined' ? window.innerWidth < 640 : false,

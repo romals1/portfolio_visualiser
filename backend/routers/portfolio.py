@@ -4,7 +4,6 @@ import io
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pandas as pd
 from fastapi import APIRouter, File, UploadFile, Depends, HTTPException, Header
@@ -30,8 +29,6 @@ async def parse_transactions(files: list[UploadFile] = File(...)):
     for file in files:
         raw = await file.read()
         df = load_transactions(io.BytesIO(raw))
-        stem = Path(file.filename or "manual").stem
-        df["portfolio"] = stem
         all_frames.append(df)
 
     if not all_frames:
@@ -39,7 +36,7 @@ async def parse_transactions(files: list[UploadFile] = File(...)):
 
     combined = pd.concat(all_frames, ignore_index=True).sort_values("date").reset_index(drop=True)
     combined["date"] = combined["date"].dt.strftime("%Y-%m-%d")
-    cols = ["date", "ticker", "action", "quantity", "price", "fees", "exchange", "currency", "portfolio"]
+    cols = ["date", "ticker", "action", "quantity", "price", "fees", "exchange", "currency"]
     result = combined.reindex(columns=cols).fillna({"fees": 0.0}).to_dict(orient="records")
     return {"transactions": result}
 
@@ -157,7 +154,7 @@ async def get_transactions(user: _AuthedUser = Depends(get_authed_user)):
         client.postgrest.auth(user.token)
         resp = (
             client.table("user_transaction_rows")
-            .select("date,ticker,action,quantity,price,fees,exchange,currency,portfolio")
+            .select("date,ticker,action,quantity,price,fees,exchange,currency")
             .eq("user_id", user.user_id)
             .order("date", desc=False)
             .order("created_at", desc=False)
@@ -197,7 +194,6 @@ async def save_transactions(body: TransactionsRequest, user: _AuthedUser = Depen
                     "fees": t.get("fees", 0),
                     "exchange": t["exchange"],
                     "currency": t.get("currency") or ("AUD" if t["exchange"] == "ASX" else "USD"),
-                    "portfolio": t["portfolio"],
                 }
                 for t in body.transactions
             ]

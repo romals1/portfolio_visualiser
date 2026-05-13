@@ -20,7 +20,6 @@ export default function UploadModal({ isOpen, onClose, onTransactionsParsed }: P
   const [dragging, setDragging] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [portfolioOverride, setPortfolioOverride] = useState('')
   const [exchangeOverride, setExchangeOverride] = useState<ExchangeOpt>('auto')
   const [currencyOverride, setCurrencyOverride] = useState<CurrencyOpt>('auto')
 
@@ -36,7 +35,6 @@ export default function UploadModal({ isOpen, onClose, onTransactionsParsed }: P
   const applyDefaults = (txns: Transaction[]): Transaction[] =>
     txns.map((t) => {
       const next = { ...t }
-      if (portfolioOverride.trim()) next.portfolio = portfolioOverride.trim()
       if (exchangeOverride !== 'auto') {
         next.exchange = exchangeOverride
         if (currencyOverride === 'auto') {
@@ -146,17 +144,7 @@ export default function UploadModal({ isOpen, onClose, onTransactionsParsed }: P
           <div className="space-y-3">
             <p className="text-xs uppercase tracking-wide text-gray-500">Defaults (optional)</p>
 
-            <div className="grid grid-cols-3 gap-3">
-              <label className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
-                <span>Portfolio</span>
-                <input
-                  value={portfolioOverride}
-                  onChange={(e) => setPortfolioOverride(e.target.value)}
-                  placeholder="from filename"
-                  className="w-full bg-gray-50 dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded px-2 py-1 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-gray-400 dark:focus:border-gray-600"
-                />
-              </label>
-
+            <div className="grid grid-cols-2 gap-3">
               <label className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
                 <span>Market</span>
                 <select

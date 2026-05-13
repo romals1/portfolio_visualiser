@@ -6,7 +6,6 @@ export interface Transaction {
   price: number
   fees: number
   exchange: string
-  portfolio: string
   currency: string
 }
 
@@ -17,7 +16,12 @@ export interface SymbolData {
   div_cashflow: number[]
 }
 
-export interface PortfolioData {
+export interface BenchmarkData {
+  dates: string[]
+  values: number[]
+}
+
+export interface ComputeResult {
   dates: string[]
   portfolio_value: number[]
   net_return: number[]
@@ -25,15 +29,6 @@ export interface PortfolioData {
   dividend_return: number[]
   display_currency: string
   symbols: Record<string, SymbolData>
-}
-
-export interface BenchmarkData {
-  dates: string[]
-  values: number[]
-}
-
-export interface ComputeResult {
-  portfolios: Record<string, PortfolioData>
   benchmarks: Record<string, BenchmarkData>
   failed_tickers: string[]
 }

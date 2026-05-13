@@ -29,7 +29,6 @@ const COLUMNS: Column[] = [
   { key: 'price', label: 'Price' },
   { key: 'fees', label: 'Fees' },
   { key: 'exchange', label: 'Exchange' },
-  { key: 'portfolio', label: 'Portfolio' },
 ]
 
 export function emptyRow(): Transaction {
@@ -42,13 +41,12 @@ export function emptyRow(): Transaction {
     fees: 0,
     exchange: 'US',
     currency: 'USD',
-    portfolio: 'manual',
   }
 }
 
 function downloadCSV(txns: Transaction[]) {
   const cols: (keyof Transaction)[] = [
-    'date', 'ticker', 'action', 'quantity', 'price', 'fees', 'exchange', 'portfolio',
+    'date', 'ticker', 'action', 'quantity', 'price', 'fees', 'exchange',
   ]
   const header = cols.join(',')
   const rows = txns.map((r) => cols.map((c) => r[c]).join(','))
@@ -236,13 +234,6 @@ export default function TransactionTable({ transactions, onChange, onUpload }: P
                       <option key={ex}>{ex}</option>
                     ))}
                   </select>
-                </td>
-                <td className="px-2 py-1">
-                  <input
-                    value={row.portfolio}
-                    onChange={(e) => update(originalIndex, 'portfolio', e.target.value)}
-                    className="bg-transparent text-gray-800 dark:text-gray-200 focus:outline-none w-28"
-                  />
                 </td>
                 <td className="px-2 py-1">
                   <button

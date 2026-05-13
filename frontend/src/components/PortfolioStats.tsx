@@ -145,86 +145,49 @@ function StatCard({
   )
 }
 
-function StatsRow({ stats, currency }: { stats: Stats; currency: string }) {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      <StatCard
-        title="Current value"
-        absoluteValue={stats.currentValue}
-        percentValue={0}
-        currency={currency}
-        neutral
-      />
-      <StatCard
-        title="Total return"
-        absoluteValue={stats.totalReturnAbsolute}
-        percentValue={stats.totalReturnPercent}
-        currency={currency}
-      />
-      <StatCard
-        title="Annualized return"
-        absoluteValue={0}
-        percentValue={stats.annualizedReturn}
-        currency={currency}
-        showAbsolute={false}
-      />
-      <StatCard
-        title="Return past week"
-        absoluteValue={stats.pastWeek.absolute}
-        percentValue={stats.pastWeek.percent}
-        currency={currency}
-      />
-    </div>
-  )
-}
-
 export default function PortfolioStats({ result }: Props) {
-  const portfolioNames = Object.keys(result.portfolios)
+  const { dates, portfolio_value: pv, net_return: nr, display_currency } = result
 
-  if (portfolioNames.length === 1) {
-    const portName = portfolioNames[0]
-    const { dates, portfolio_value: pv, net_return: nr, display_currency } = result.portfolios[portName]
-
-    if (dates.length < 2 || !pv.some((v) => v > 0)) {
-      return (
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
-          <p className="text-gray-600 dark:text-gray-400 text-center py-8">Not enough data to compute statistics</p>
-        </div>
-      )
-    }
-
-    const stats = computeStats(dates, pv, nr, display_currency)
-
+  if (dates.length < 2 || !pv.some((v) => v > 0)) {
     return (
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
-        <StatsRow stats={stats} currency={display_currency} />
+        <p className="text-gray-600 dark:text-gray-400 text-center py-8">Not enough data to compute statistics</p>
       </div>
     )
   }
 
+  const stats = computeStats(dates, pv, nr, display_currency)
+
   return (
-    <div className="space-y-4">
-      {portfolioNames.map((portName) => {
-        const { dates, portfolio_value: pv, net_return: nr, display_currency } = result.portfolios[portName]
-
-        if (dates.length < 2 || !pv.some((v) => v > 0)) {
-          return (
-            <div key={portName} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
-              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">{portName}</h3>
-              <p className="text-gray-600 dark:text-gray-400 text-center py-4">Not enough data to compute statistics</p>
-            </div>
-          )
-        }
-
-        const stats = computeStats(dates, pv, nr, display_currency)
-
-        return (
-          <div key={portName} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
-            <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-4">{portName}</h3>
-            <StatsRow stats={stats} currency={display_currency} />
-          </div>
-        )
-      })}
+    <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          title="Current value"
+          absoluteValue={stats.currentValue}
+          percentValue={0}
+          currency={display_currency}
+          neutral
+        />
+        <StatCard
+          title="Total return"
+          absoluteValue={stats.totalReturnAbsolute}
+          percentValue={stats.totalReturnPercent}
+          currency={display_currency}
+        />
+        <StatCard
+          title="Annualized return"
+          absoluteValue={0}
+          percentValue={stats.annualizedReturn}
+          currency={display_currency}
+          showAbsolute={false}
+        />
+        <StatCard
+          title="Return past week"
+          absoluteValue={stats.pastWeek.absolute}
+          percentValue={stats.pastWeek.percent}
+          currency={display_currency}
+        />
+      </div>
     </div>
   )
 }

@@ -7,7 +7,6 @@ interface Props {
 
 interface HoldingRow {
   ticker: string
-  portfolio: string
   marketValue: number
   netReturn: number
   percentReturn: number
@@ -18,7 +17,6 @@ interface HoldingRow {
 
 type SortKey =
   | 'ticker'
-  | 'portfolio'
   | 'marketValue'
   | 'netReturn'
   | 'percentReturn'
@@ -33,7 +31,6 @@ interface Column {
 
 const COLUMNS: Column[] = [
   { key: 'ticker', label: 'Symbol' },
-  { key: 'portfolio', label: 'Portfolio' },
   { key: 'marketValue', label: 'Market Value', align: 'right' },
   { key: 'netReturn', label: 'Net Return', align: 'right' },
   { key: 'percentReturn', label: 'Return %', align: 'right' },
@@ -85,35 +82,32 @@ function computeDayWeightedReturn(value: number[], netReturn: number[]): number 
 
 function buildRows(result: ComputeResult): HoldingRow[] {
   const rows: HoldingRow[] = []
-  for (const [portfolioName, port] of Object.entries(result.portfolios)) {
-    const lastIdx = port.dates.length - 1
-    if (lastIdx < 0) continue
-    for (const [ticker, sym] of Object.entries(port.symbols)) {
-      const marketValue = sym.value[lastIdx] ?? 0
-      if (!(marketValue > 0)) continue
-      const netReturn = sym.net_return[lastIdx] ?? 0
-      const percentReturn = computeDayWeightedReturn(sym.value, sym.net_return)
+  const lastIdx = result.dates.length - 1
+  if (lastIdx < 0) return rows
+  for (const [ticker, sym] of Object.entries(result.symbols)) {
+    const marketValue = sym.value[lastIdx] ?? 0
+    if (!(marketValue > 0)) continue
+    const netReturn = sym.net_return[lastIdx] ?? 0
+    const percentReturn = computeDayWeightedReturn(sym.value, sym.net_return)
 
-      const weekAgoIdx = Math.max(0, lastIdx - 5)
-      let pastWeekAbsolute = 0
-      let pastWeekPercent = 0
-      if (weekAgoIdx < lastIdx) {
-        pastWeekAbsolute = netReturn - (sym.net_return[weekAgoIdx] ?? 0)
-        const weekAgoValue = sym.value[weekAgoIdx] ?? 0
-        pastWeekPercent = weekAgoValue !== 0 ? pastWeekAbsolute / weekAgoValue : 0
-      }
-
-      rows.push({
-        ticker,
-        portfolio: portfolioName,
-        marketValue,
-        netReturn,
-        percentReturn,
-        pastWeekAbsolute,
-        pastWeekPercent,
-        currency: port.display_currency,
-      })
+    const weekAgoIdx = Math.max(0, lastIdx - 5)
+    let pastWeekAbsolute = 0
+    let pastWeekPercent = 0
+    if (weekAgoIdx < lastIdx) {
+      pastWeekAbsolute = netReturn - (sym.net_return[weekAgoIdx] ?? 0)
+      const weekAgoValue = sym.value[weekAgoIdx] ?? 0
+      pastWeekPercent = weekAgoValue !== 0 ? pastWeekAbsolute / weekAgoValue : 0
     }
+
+    rows.push({
+      ticker,
+      marketValue,
+      netReturn,
+      percentReturn,
+      pastWeekAbsolute,
+      pastWeekPercent,
+      currency: result.display_currency,
+    })
   }
   return rows
 }
@@ -133,7 +127,7 @@ export default function HoldingsTable({ result }: Props) {
       setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
     } else {
       setSortKey(key)
-      setSortDir(key === 'ticker' || key === 'portfolio' ? 'asc' : 'desc')
+      setSortDir(key === 'ticker' ? 'asc' : 'desc')
     }
   }
 
@@ -226,11 +220,10 @@ export default function HoldingsTable({ result }: Props) {
           <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
             {sorted.map((row, idx) => (
               <tr
-                key={`${row.portfolio}::${row.ticker}`}
+                key={row.ticker}
                 className={(idx % 2 === 0 ? 'bg-gray-50 dark:bg-gray-950' : 'bg-white dark:bg-gray-900') + ' hover:bg-gray-200 dark:hover:bg-gray-800'}
               >
                 <td className="px-3 py-2 text-gray-800 dark:text-gray-200 font-medium">{row.ticker}</td>
-                <td className="px-3 py-2 text-gray-700 dark:text-gray-300">{row.portfolio}</td>
                 <td className="px-3 py-2 text-right text-gray-800 dark:text-gray-200 tabular-nums">
                   {formatCurrency(row.marketValue, row.currency)}
                 </td>

@@ -64,11 +64,9 @@ export default function App() {
     // User is taking action; ensure any in-flight initial load can't overwrite this.
     loadCancelledRef.current = true
     hasLoadedRef.current = true
-    setTransactions((prev: Transaction[]) => {
-      const newPortfolios = new Set(newTxns.map((t: Transaction) => t.portfolio))
-      const kept = prev.filter((t: Transaction) => !newPortfolios.has(t.portfolio))
-      return [...kept, ...newTxns].sort((a: Transaction, b: Transaction) => a.date.localeCompare(b.date))
-    })
+    setTransactions((prev: Transaction[]) =>
+      [...prev, ...newTxns].sort((a: Transaction, b: Transaction) => a.date.localeCompare(b.date)),
+    )
     setComputeResult(null)
     setComputeError(null)
   }
