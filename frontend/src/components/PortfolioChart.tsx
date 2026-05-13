@@ -137,24 +137,15 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
 
   // Benchmark overlays (skip in breakdown mode)
   if (!showBreakdown) {
-    const firstNonZeroIdx = pv.findIndex((v) => v > 0)
-    const tRef = firstNonZeroIdx >= 0 ? dates[firstNonZeroIdx] : null
-    const pvRef = firstNonZeroIdx >= 0 ? pv[firstNonZeroIdx] : null
-
     for (const [bm, bmData] of Object.entries(benchmarks)) {
       if (!bmData.dates.length) continue
       if (showRolling) {
-        const rolling = rollingAnnReturn(bmData.values, bmData.values, rollingWindow)
+        const rolling = rollingAnnReturn(bmData.net_return, bmData.portfolio_value, rollingWindow)
         const [fd, fv] = applyRange(bmData.dates, rolling, cutoff)
         traces.push({ x: fd, y: fv, mode: 'lines', name: bm, line: { dash: 'dash' }, hovertemplate: `${bm} %{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
-      } else if (tRef !== null && pvRef !== null) {
-        const refIdx = bmData.dates.findIndex((d) => d >= tRef)
-        if (refIdx === -1) continue
-        const bmRef = bmData.values[refIdx]
-        if (!bmRef) continue
-        const scaled = bmData.values.map((v) => (v / bmRef) * pvRef)
-        const adjusted = showNetReturn ? scaled.map((v) => v - pvRef) : scaled
-        const [fd, fv] = applyRange(bmData.dates, adjusted, cutoff)
+      } else {
+        const vals = showNetReturn ? bmData.net_return : bmData.portfolio_value
+        const [fd, fv] = applyRange(bmData.dates, vals, cutoff)
         traces.push({ x: fd, y: fv, mode: 'lines', name: bm, line: { dash: 'dash' }, hovertemplate: `${bm} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
       }
     }

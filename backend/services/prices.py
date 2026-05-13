@@ -148,12 +148,14 @@ def fetch_prices_and_dividends_safely(
                 need_div_symbols.append(ys)
 
     from .price_cache_db import (
-        load_prices_batch,
-        load_dividends_batch,
-        save_prices_async,
-        save_dividends_async,
-        gaps as compute_gaps,
         db_available,
+        load_dividends_batch,
+        load_prices_batch,
+        save_dividends_async,
+        save_prices_async,
+    )
+    from .price_cache_db import (
+        gaps as compute_gaps,
     )
 
     req_start: date_t = pd.Timestamp(start).date()

@@ -465,7 +465,16 @@ export async function computePortfolio(
     }
   }
 
-  let benchmarkData: Record<string, { dates: string[]; values: number[] }> = {}
+  // Per-bar trade cashflows in display currency (negative = buy, positive = sell).
+  // Derived from the aggregate capital_return and portfolio_value series:
+  //   cumTradeCf[i] = capitalReturn[i] - portfolioValue[i]
+  //   tradeCfBar[i] = cumTradeCf[i] - cumTradeCf[i-1]
+  const aggPortfolioValue = sumSeries(pvParts)
+  const aggCapitalReturn = sumSeries(crParts)
+  const cumTradeCf = aggCapitalReturn.map((cr, i) => cr - aggPortfolioValue[i])
+  const tradeCfBar = cumTradeCf.map((v, i) => v - (i > 0 ? cumTradeCf[i - 1] : 0))
+
+  let benchmarkData: Record<string, { dates: string[]; portfolio_value: number[]; net_return: number[] }> = {}
   if (benchmarkTickers.length > 0 && allSortedDates.length > 0) {
     const bm_start = formatDate(parseDate(allSortedDates[0]))
     const bm_end = formatDate(new Date())
@@ -477,9 +486,43 @@ export async function computePortfolio(
         end: bm_end,
       })
 
+      // Convert USD benchmark prices to display currency if needed.
+      let benchmarkFxAxis: number[] | null = null
+      if (displayCurrency === 'AUD' && fxData['AUD']) {
+        const audUsd = fxOnAxis(fxData['AUD'], allSortedDates)
+        benchmarkFxAxis = audUsd.map(v => 1 / v)
+      }
+
       for (const bm of benchmarkTickers) {
-        if (bm in resp.data.prices) {
-          benchmarkData[bm] = resp.data.prices[bm]
+        if (!(bm in resp.data.prices)) continue
+        const bmRaw = resp.data.prices[bm]
+
+        const bmPricesUSD = forwardFillPrices(bmRaw.values, bmRaw.dates, allSortedDates)
+        const bmPricesDisplay = benchmarkFxAxis
+          ? bmPricesUSD.map((p, i) => p * benchmarkFxAxis![i])
+          : bmPricesUSD
+
+        // Simulate: for each trade, invest/divest the same notional in the benchmark.
+        // unitsChange[i] = -tradeCfBar[i] / bmPrice[i]
+        //   (tradeCfBar < 0 for buys → positive units; > 0 for sells → negative units)
+        let cumulativeUnits = 0
+        const bmPortfolioValue: number[] = []
+
+        for (let i = 0; i < allSortedDates.length; i++) {
+          const bmPrice = bmPricesDisplay[i]
+          if (Number.isFinite(bmPrice) && bmPrice > 0 && tradeCfBar[i] !== 0) {
+            cumulativeUnits += -tradeCfBar[i] / bmPrice
+          }
+          bmPortfolioValue.push(Number.isFinite(bmPrice) && bmPrice > 0 ? cumulativeUnits * bmPrice : 0)
+        }
+
+        // Benchmark net return uses the same cumulative cost basis as the actual portfolio.
+        const bmNetReturn = bmPortfolioValue.map((v, i) => v + cumTradeCf[i])
+
+        benchmarkData[bm] = {
+          dates: allSortedDates,
+          portfolio_value: bmPortfolioValue,
+          net_return: bmNetReturn,
         }
       }
     } catch {

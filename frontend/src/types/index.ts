@@ -21,7 +21,8 @@ export interface SymbolData {
 
 export interface BenchmarkData {
   dates: string[]
-  values: number[]
+  portfolio_value: number[]
+  net_return: number[]
 }
 
 export interface ComputeResult {
