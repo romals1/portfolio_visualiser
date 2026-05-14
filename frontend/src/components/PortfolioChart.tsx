@@ -69,6 +69,16 @@ function cumulativePerformanceSeries(portfolioValue: number[], netReturn: number
   return out
 }
 
+function rebaseToZero(values: (number | null)[], multiplicative: boolean): (number | null)[] {
+  const firstVal = values.find((v) => v !== null) ?? null
+  if (firstVal === null) return values
+  if (multiplicative) {
+    const base = 1 + firstVal
+    return values.map((v) => (v === null ? null : (1 + v) / base - 1))
+  }
+  return values.map((v) => (v === null ? null : v - firstVal))
+}
+
 function cutoffForRange(range: Range): string | null {
   if (range === 'All') return null
   const today = new Date()
@@ -145,12 +155,12 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
       for (const [ticker, sym] of Object.entries(symbols)) {
         const cumPerf = cumulativePerformanceSeries(sym.value, sym.net_return)
         const [fd, fv] = applyRange(dates, cumPerf, cutoff)
-        traces.push({ x: fd, y: fv, mode: 'lines', name: ticker, hovertemplate: `${ticker} %{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
+        traces.push({ x: fd, y: rebaseToZero(fv, true), mode: 'lines', name: ticker, hovertemplate: `${ticker} %{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
       }
     } else {
       const cumPerf = cumulativePerformanceSeries(pv, nr)
       const [fd, fv] = applyRange(dates, cumPerf, cutoff)
-      traces.push({ x: fd, y: fv, mode: 'lines', name: 'Portfolio', hovertemplate: `%{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
+      traces.push({ x: fd, y: rebaseToZero(fv, true), mode: 'lines', name: 'Portfolio', hovertemplate: `%{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
     }
   } else if (showBreakdown) {
     // Breakdown decomposes net return into three components that sum to it:
@@ -165,7 +175,7 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
           if (!vals.some((v) => Math.abs(v) > 0)) continue
           const label = `${ticker} — ${suffix}`
           const [fd, fv] = applyRange(dates, vals, cutoff)
-          traces.push({ x: fd, y: fv, mode: 'lines', name: label, hovertemplate: `${label} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
+          traces.push({ x: fd, y: rebaseToZero(fv, false), mode: 'lines', name: label, hovertemplate: `${label} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
         }
       }
     } else {
@@ -176,19 +186,19 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
       ] as [string, number[]][]) {
         if (!vals.some((v) => Math.abs(v) > 0)) continue
         const [fd, fv] = applyRange(dates, vals, cutoff)
-        traces.push({ x: fd, y: fv, mode: 'lines', name: labelSuffix, hovertemplate: `${labelSuffix} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
+        traces.push({ x: fd, y: rebaseToZero(fv, false), mode: 'lines', name: labelSuffix, hovertemplate: `${labelSuffix} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
       }
     }
   } else if (bySymbol) {
     for (const [ticker, sym] of Object.entries(symbols)) {
       const vals = showNetReturn ? sym.net_return : sym.value
       const [fd, fv] = applyRange(dates, vals, cutoff)
-      traces.push({ x: fd, y: fv, mode: 'lines', name: ticker, hovertemplate: `${ticker} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
+      traces.push({ x: fd, y: showNetReturn ? rebaseToZero(fv, false) : fv, mode: 'lines', name: ticker, hovertemplate: `${ticker} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
     }
   } else {
     const vals = showNetReturn ? nr : pv
     const [fd, fv] = applyRange(dates, vals, cutoff)
-    traces.push({ x: fd, y: fv, mode: 'lines', name: 'Portfolio', hovertemplate: `%{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
+    traces.push({ x: fd, y: showNetReturn ? rebaseToZero(fv, false) : fv, mode: 'lines', name: 'Portfolio', hovertemplate: `%{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
   }
 
   // Benchmark overlays (skip in breakdown mode)
@@ -206,11 +216,11 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
       } else if (showCumulativePerf) {
         const cumPerf = cumulativePerformanceSeries(bmData.portfolio_value, bmData.net_return)
         const [fd, fv] = applyRange(bmData.dates, cumPerf, cutoff)
-        traces.push({ x: fd, y: fv, mode: 'lines', name: bm, line: { dash: 'dash' }, hovertemplate: `${bm} %{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
+        traces.push({ x: fd, y: rebaseToZero(fv, true), mode: 'lines', name: bm, line: { dash: 'dash' }, hovertemplate: `${bm} %{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
       } else {
         const vals = showNetReturn ? bmData.net_return : bmData.portfolio_value
         const [fd, fv] = applyRange(bmData.dates, vals, cutoff)
-        traces.push({ x: fd, y: fv, mode: 'lines', name: bm, line: { dash: 'dash' }, hovertemplate: `${bm} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
+        traces.push({ x: fd, y: showNetReturn ? rebaseToZero(fv, false) : fv, mode: 'lines', name: bm, line: { dash: 'dash' }, hovertemplate: `${bm} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
       }
     }
   }
