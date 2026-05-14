@@ -10,8 +10,8 @@ interface HoldingRow {
   marketValue: number
   netReturn: number
   percentReturn: number
-  pastWeekAbsolute: number
-  pastWeekPercent: number
+  sinceSundayAbsolute: number
+  sinceSundayPercent: number
   currency: string
 }
 
@@ -20,7 +20,7 @@ type SortKey =
   | 'marketValue'
   | 'netReturn'
   | 'percentReturn'
-  | 'pastWeekAbsolute'
+  | 'sinceSundayAbsolute'
 type SortDir = 'asc' | 'desc'
 
 interface Column {
@@ -34,7 +34,7 @@ const COLUMNS: Column[] = [
   { key: 'marketValue', label: 'Market Value', align: 'right' },
   { key: 'netReturn', label: 'Net Return', align: 'right' },
   { key: 'percentReturn', label: 'Return %', align: 'right' },
-  { key: 'pastWeekAbsolute', label: 'Past Week', align: 'right' },
+  { key: 'sinceSundayAbsolute', label: 'Since Sunday', align: 'right' },
 ]
 
 function formatCurrency(value: number, currency: string): string {
@@ -80,23 +80,41 @@ function computeDayWeightedReturn(value: number[], netReturn: number[]): number 
   return any ? multiplier - 1 : 0
 }
 
+function lastSundayStr(): string {
+  const today = new Date()
+  const daysBack = today.getDay() === 0 ? 0 : today.getDay()
+  const sunday = new Date(today)
+  sunday.setDate(today.getDate() - daysBack)
+  const y = sunday.getFullYear()
+  const m = String(sunday.getMonth() + 1).padStart(2, '0')
+  const d = String(sunday.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
 function buildRows(result: ComputeResult): HoldingRow[] {
   const rows: HoldingRow[] = []
   const lastIdx = result.dates.length - 1
   if (lastIdx < 0) return rows
+  const sunday = lastSundayStr()
   for (const [ticker, sym] of Object.entries(result.symbols)) {
     const marketValue = sym.value[lastIdx] ?? 0
     if (!(marketValue > 0)) continue
     const netReturn = sym.net_return[lastIdx] ?? 0
     const percentReturn = computeDayWeightedReturn(sym.value, sym.net_return)
 
-    const weekAgoIdx = Math.max(0, lastIdx - 5)
-    let pastWeekAbsolute = 0
-    let pastWeekPercent = 0
-    if (weekAgoIdx < lastIdx) {
-      pastWeekAbsolute = netReturn - (sym.net_return[weekAgoIdx] ?? 0)
-      const weekAgoValue = sym.value[weekAgoIdx] ?? 0
-      pastWeekPercent = weekAgoValue !== 0 ? pastWeekAbsolute / weekAgoValue : 0
+    let sinceSundayAbsolute = 0
+    let sinceSundayPercent = 0
+    let refIdx = -1
+    for (let i = lastIdx - 1; i >= 0; i--) {
+      if (result.dates[i] < sunday) {
+        refIdx = i
+        break
+      }
+    }
+    if (refIdx !== -1) {
+      sinceSundayAbsolute = netReturn - (sym.net_return[refIdx] ?? 0)
+      const refValue = sym.value[refIdx] ?? 0
+      sinceSundayPercent = refValue !== 0 ? sinceSundayAbsolute / refValue : 0
     }
 
     rows.push({
@@ -104,8 +122,8 @@ function buildRows(result: ComputeResult): HoldingRow[] {
       marketValue,
       netReturn,
       percentReturn,
-      pastWeekAbsolute,
-      pastWeekPercent,
+      sinceSundayAbsolute,
+      sinceSundayPercent,
       currency: result.display_currency,
     })
   }
@@ -144,8 +162,8 @@ export default function HoldingsTable({ result }: Props) {
           ? String(row[key].toFixed(2))
           : key === 'percentReturn'
             ? String((row[key] * 100).toFixed(2))
-            : key === 'pastWeekAbsolute'
-              ? `${row.pastWeekAbsolute.toFixed(2)} ${(row.pastWeekPercent * 100).toFixed(2)}`
+            : key === 'sinceSundayAbsolute'
+              ? `${row.sinceSundayAbsolute.toFixed(2)} ${(row.sinceSundayPercent * 100).toFixed(2)}`
               : String(row[key])
       return cell.toLowerCase().includes(q)
     }),
@@ -233,9 +251,9 @@ export default function HoldingsTable({ result }: Props) {
                 <td className={`px-3 py-2 text-right tabular-nums ${colorClass(row.percentReturn)}`}>
                   {formatPercent(row.percentReturn)}
                 </td>
-                <td className={`px-3 py-2 text-right tabular-nums ${colorClass(row.pastWeekAbsolute)}`}>
-                  {formatCurrency(row.pastWeekAbsolute, row.currency)}{' '}
-                  <span className="text-xs">({formatPercent(row.pastWeekPercent)})</span>
+                <td className={`px-3 py-2 text-right tabular-nums ${colorClass(row.sinceSundayAbsolute)}`}>
+                  {formatCurrency(row.sinceSundayAbsolute, row.currency)}{' '}
+                  <span className="text-xs">({formatPercent(row.sinceSundayPercent)})</span>
                 </td>
               </tr>
             ))}

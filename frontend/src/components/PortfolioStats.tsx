@@ -29,8 +29,19 @@ interface Stats {
   totalReturnAbsolute: number
   totalReturnPercent: number
   annualizedReturn: number
-  pastWeek: { absolute: number; percent: number }
+  sinceSunday: { absolute: number; percent: number }
   currency: string
+}
+
+function lastSundayStr(): string {
+  const today = new Date()
+  const daysBack = today.getDay() === 0 ? 0 : today.getDay()
+  const sunday = new Date(today)
+  sunday.setDate(today.getDate() - daysBack)
+  const y = sunday.getFullYear()
+  const m = String(sunday.getMonth() + 1).padStart(2, '0')
+  const d = String(sunday.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
 }
 
 // Day-weighted total return: cumulative product of daily multipliers.
@@ -72,7 +83,7 @@ function computeStats(
       totalReturnAbsolute: 0,
       totalReturnPercent: 0,
       annualizedReturn: 0,
-      pastWeek: { absolute: 0, percent: 0 },
+      sinceSunday: { absolute: 0, percent: 0 },
       currency,
     }
   }
@@ -90,13 +101,18 @@ function computeStats(
     annualizedReturn = Math.pow(1 + totalReturnPercent, 252 / nTradingDays) - 1
   }
 
-  let pastWeek = { absolute: 0, percent: 0 }
-  const weekAgoIdx = Math.max(0, lastIdx - 5)
-  if (weekAgoIdx < lastIdx) {
-    const weekAgoNetReturn = netReturn[weekAgoIdx]
-    const weekAgoPortfolioValue = portfolioValue[weekAgoIdx]
-    pastWeek.absolute = lastNetReturn - weekAgoNetReturn
-    pastWeek.percent = weekAgoPortfolioValue !== 0 ? pastWeek.absolute / weekAgoPortfolioValue : 0
+  const sunday = lastSundayStr()
+  let refIdx = -1
+  for (let i = lastIdx - 1; i >= firstNonZeroIdx; i--) {
+    if (dates[i] < sunday) {
+      refIdx = i
+      break
+    }
+  }
+  const sinceSunday = { absolute: 0, percent: 0 }
+  if (refIdx !== -1) {
+    sinceSunday.absolute = lastNetReturn - netReturn[refIdx]
+    sinceSunday.percent = portfolioValue[refIdx] !== 0 ? sinceSunday.absolute / portfolioValue[refIdx] : 0
   }
 
   return {
@@ -104,7 +120,7 @@ function computeStats(
     totalReturnAbsolute,
     totalReturnPercent,
     annualizedReturn,
-    pastWeek,
+    sinceSunday,
     currency,
   }
 }
@@ -182,9 +198,9 @@ export default function PortfolioStats({ result }: Props) {
           showAbsolute={false}
         />
         <StatCard
-          title="Return past week"
-          absoluteValue={stats.pastWeek.absolute}
-          percentValue={stats.pastWeek.percent}
+          title="Return since Sunday"
+          absoluteValue={stats.sinceSunday.absolute}
+          percentValue={stats.sinceSunday.percent}
           currency={display_currency}
         />
       </div>
