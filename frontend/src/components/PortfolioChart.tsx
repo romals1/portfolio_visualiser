@@ -4,7 +4,7 @@ import { ComputeResult } from '../types'
 import { useTheme } from '../lib/useTheme'
 
 type View = 'total' | 'by_symbol'
-type Metric = 'portfolio_value' | 'net_return' | 'rolling_return' | 'breakdown'
+type Metric = 'portfolio_value' | 'net_return' | 'rolling_performance' | 'rolling_return' | 'cumulative_performance' | 'breakdown'
 type Range = 'All' | 'YTD' | '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y'
 
 interface Props {
@@ -35,6 +35,36 @@ function rollingAnnReturn(
       logSum += Math.log(mult)
     }
     if (valid) out[i] = Math.exp(logSum * (252 / window)) - 1
+  }
+  return out
+}
+
+function rollingCurrencyReturn(netReturn: number[], window: number): (number | null)[] {
+  const out: (number | null)[] = new Array(netReturn.length).fill(null)
+  for (let i = window; i < netReturn.length; i++) {
+    out[i] = netReturn[i] - netReturn[i - window]
+  }
+  return out
+}
+
+function cumulativePerformanceSeries(portfolioValue: number[], netReturn: number[]): (number | null)[] {
+  const out: (number | null)[] = new Array(portfolioValue.length).fill(null)
+  const firstNonZero = portfolioValue.findIndex((v) => v > 0)
+  if (firstNonZero === -1) return out
+  out[firstNonZero] = 0
+  let multiplier = 1
+  for (let t = firstNonZero + 1; t < portfolioValue.length; t++) {
+    const cumCfPrev = netReturn[t - 1] - portfolioValue[t - 1]
+    const cumCfCurr = netReturn[t] - portfolioValue[t]
+    const cashflow = cumCfCurr - cumCfPrev
+    const deployed = Math.max(-cashflow, 0)
+    const withdrawn = Math.max(cashflow, 0)
+    const denom = portfolioValue[t - 1] + deployed
+    if (denom > 0) {
+      const dayMult = (portfolioValue[t] + withdrawn) / denom
+      if (Number.isFinite(dayMult) && dayMult >= 0) multiplier *= dayMult
+    }
+    out[t] = multiplier - 1
   }
   return out
 }
@@ -76,7 +106,9 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
   } = result
   const cutoff = cutoffForRange(range)
 
-  const showRolling = metric === 'rolling_return'
+  const showRolling = metric === 'rolling_performance'
+  const showRollingReturn = metric === 'rolling_return'
+  const showCumulativePerf = metric === 'cumulative_performance'
   const showNetReturn = metric === 'net_return'
   const showBreakdown = metric === 'breakdown'
   const bySymbol = view === 'by_symbol'
@@ -94,6 +126,30 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
     } else {
       const rolling = rollingAnnReturn(nr, pv, rollingWindow)
       const [fd, fv] = applyRange(dates, rolling, cutoff)
+      traces.push({ x: fd, y: fv, mode: 'lines', name: 'Portfolio', hovertemplate: `%{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
+    }
+  } else if (showRollingReturn) {
+    if (bySymbol) {
+      for (const [ticker, sym] of Object.entries(symbols)) {
+        const rolling = rollingCurrencyReturn(sym.net_return, rollingWindow)
+        const [fd, fv] = applyRange(dates, rolling, cutoff)
+        traces.push({ x: fd, y: fv, mode: 'lines', name: ticker, hovertemplate: `${ticker} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
+      }
+    } else {
+      const rolling = rollingCurrencyReturn(nr, rollingWindow)
+      const [fd, fv] = applyRange(dates, rolling, cutoff)
+      traces.push({ x: fd, y: fv, mode: 'lines', name: 'Portfolio', hovertemplate: `%{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
+    }
+  } else if (showCumulativePerf) {
+    if (bySymbol) {
+      for (const [ticker, sym] of Object.entries(symbols)) {
+        const cumPerf = cumulativePerformanceSeries(sym.value, sym.net_return)
+        const [fd, fv] = applyRange(dates, cumPerf, cutoff)
+        traces.push({ x: fd, y: fv, mode: 'lines', name: ticker, hovertemplate: `${ticker} %{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
+      }
+    } else {
+      const cumPerf = cumulativePerformanceSeries(pv, nr)
+      const [fd, fv] = applyRange(dates, cumPerf, cutoff)
       traces.push({ x: fd, y: fv, mode: 'lines', name: 'Portfolio', hovertemplate: `%{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
     }
   } else if (showBreakdown) {
@@ -143,6 +199,14 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
         const rolling = rollingAnnReturn(bmData.net_return, bmData.portfolio_value, rollingWindow)
         const [fd, fv] = applyRange(bmData.dates, rolling, cutoff)
         traces.push({ x: fd, y: fv, mode: 'lines', name: bm, line: { dash: 'dash' }, hovertemplate: `${bm} %{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
+      } else if (showRollingReturn) {
+        const rolling = rollingCurrencyReturn(bmData.net_return, rollingWindow)
+        const [fd, fv] = applyRange(bmData.dates, rolling, cutoff)
+        traces.push({ x: fd, y: fv, mode: 'lines', name: bm, line: { dash: 'dash' }, hovertemplate: `${bm} %{x|%Y-%m-%d}<br>$%{y:,.2f} ${display_currency}<extra></extra>` })
+      } else if (showCumulativePerf) {
+        const cumPerf = cumulativePerformanceSeries(bmData.portfolio_value, bmData.net_return)
+        const [fd, fv] = applyRange(bmData.dates, cumPerf, cutoff)
+        traces.push({ x: fd, y: fv, mode: 'lines', name: bm, line: { dash: 'dash' }, hovertemplate: `${bm} %{x|%Y-%m-%d}<br>%{y:.1%}<extra></extra>` })
       } else {
         const vals = showNetReturn ? bmData.net_return : bmData.portfolio_value
         const [fd, fv] = applyRange(bmData.dates, vals, cutoff)
@@ -151,14 +215,14 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
     }
   }
 
-  const yTitle = showRolling
-    ? 'Annualised return'
-    : showBreakdown || showNetReturn
+  const yTitle = showRolling || showCumulativePerf
+    ? showRolling ? 'Annualised return' : 'Cumulative return'
+    : showRollingReturn || showBreakdown || showNetReturn
     ? `Return ($ ${display_currency})`
     : `Value ($ ${display_currency})`
 
   const showLegend =
-    bySymbol || showRolling || showBreakdown || Object.keys(benchmarks).length > 0
+    bySymbol || showRolling || showRollingReturn || showCumulativePerf || showBreakdown || Object.keys(benchmarks).length > 0
 
   const [isNarrow, setIsNarrow] = useState(
     typeof window !== 'undefined' ? window.innerWidth < 640 : false,
@@ -180,7 +244,7 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
     : { bgcolor: 'rgba(0,0,0,0)', bordercolor: chartColors.line }
 
   const shapes =
-    showRolling || showNetReturn || showBreakdown
+    showRolling || showRollingReturn || showCumulativePerf || showNetReturn || showBreakdown
       ? [{ type: 'line', x0: 0, x1: 1, xref: 'paper', y0: 0, y1: 0, line: { color: chartColors.zero, width: 1, dash: 'dash' } }]
       : []
 
@@ -193,7 +257,7 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
           plot_bgcolor: 'transparent',
           font: { color: chartColors.font, family: 'ui-sans-serif, system-ui, sans-serif' },
           height: 500,
-          margin: { t: 40, b: isNarrow && showLegend ? 120 : 40, l: 70, r: 20 },
+          margin: { t: 40, b: isNarrow && showLegend ? 140 : 40, l: 70, r: 20 },
           showlegend: showLegend,
           legend: legendLayout,
           xaxis: { gridcolor: chartColors.grid, linecolor: chartColors.line, tickcolor: chartColors.line },
@@ -202,7 +266,7 @@ export default function PortfolioChart({ result, view, metric, range, rollingWin
             gridcolor: chartColors.grid,
             linecolor: chartColors.line,
             tickcolor: chartColors.line,
-            tickformat: showRolling ? '.0%' : undefined,
+            tickformat: showRolling || showCumulativePerf ? '.0%' : undefined,
           },
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           shapes: shapes as any,

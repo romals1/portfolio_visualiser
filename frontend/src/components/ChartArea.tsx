@@ -4,7 +4,7 @@ import PortfolioChart from './PortfolioChart'
 import Spinner from './Spinner'
 
 type View = 'total' | 'by_symbol'
-type Metric = 'portfolio_value' | 'net_return' | 'rolling_return' | 'breakdown'
+type Metric = 'portfolio_value' | 'net_return' | 'rolling_performance' | 'rolling_return' | 'cumulative_performance' | 'breakdown'
 type Range = 'All' | 'YTD' | '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y'
 
 interface Props {
@@ -93,7 +93,9 @@ export default function ChartArea({ computeResult, isComputing, benchmarkTickers
             options={[
               { value: 'portfolio_value', label: 'Portfolio value' },
               { value: 'net_return', label: 'Net return' },
+              { value: 'rolling_performance', label: 'Rolling performance' },
               { value: 'rolling_return', label: 'Rolling return' },
+              { value: 'cumulative_performance', label: 'Cumulative performance' },
               { value: 'breakdown', label: 'Return breakdown' },
             ]}
             value={metric}
@@ -103,7 +105,7 @@ export default function ChartArea({ computeResult, isComputing, benchmarkTickers
 
         <RadioGroup label="Range" options={rangeOptions} value={range} onChange={setRange} />
 
-        {metric === 'rolling_return' && (
+        {(metric === 'rolling_performance' || metric === 'rolling_return') && (
           <div className="space-y-1">
             <p className="text-xs text-gray-500 uppercase tracking-wide">
               Rolling window: {rollingWindow} trading days
