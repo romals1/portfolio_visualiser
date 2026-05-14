@@ -237,6 +237,18 @@ export async function computePortfolio(
     }
   }
 
+  // Build a unified date axis from all instrument price series so that
+  // multi-currency groups (e.g. ASX + US) share the same array length.
+  // Without this, sumDataFrames receives arrays of different lengths and
+  // pads the shorter one with trailing zeros, which causes
+  // computeDayWeightedReturn to misinterpret the zeros as a position
+  // collapse and produce 0% return for the shorter-history symbol.
+  const unifiedDatesSet = new Set<string>()
+  for (const data of Object.values(allPricesData)) {
+    data.dates.forEach(d => unifiedDatesSet.add(d))
+  }
+  const unifiedDates = Array.from(unifiedDatesSet).sort()
+
   const pvParts: number[][] = []
   const nrParts: number[][] = []
   const crParts: number[][] = []
@@ -251,7 +263,7 @@ export async function computePortfolio(
   const scrPureParts: Record<string, number[]>[] = []
   const sdcPureParts: Record<string, number[]>[] = []
   const sfxRetParts: Record<string, number[]>[] = []
-  let allSortedDates: string[] = []
+  let allSortedDates: string[] = unifiedDates
 
   for (const [currency, currencyTxns] of currencyMap) {
     const tradeRows = currencyTxns.filter(t => ['BUY', 'SELL'].includes(t.action))
@@ -289,11 +301,7 @@ export async function computePortfolio(
       fxFeed = fxData['AUD']
     }
 
-    const allDates = new Set<string>()
-    for (const ticker in pricesData) {
-      pricesData[ticker].dates.forEach(d => allDates.add(d))
-    }
-    const sortedDates = Array.from(allDates).sort()
+    const sortedDates = unifiedDates
 
     // fxAxis: per-bar native→display rate, used for actual display values.
     // fxToday: scalar for the "pure" (FX-stripped) series at today's rate.
@@ -368,7 +376,7 @@ export async function computePortfolio(
     const tradeCfNative: Record<string, number[]> = {}
     const divCfNative: Record<string, number[]> = {}
     for (const ticker of tickers) {
-      pvNative[ticker] = positions[ticker].map((pos, i) => pos * prices[ticker][i])
+      pvNative[ticker] = positions[ticker].map((pos, i) => pos === 0 ? 0 : pos * prices[ticker][i])
       tradeCfNative[ticker] = cumsum(tradeBarNative[ticker])
       divCfNative[ticker] = cumsum(divBarNative[ticker])
     }
@@ -437,7 +445,6 @@ export async function computePortfolio(
     scrPureParts.push(symbolCapitalReturnsPure)
     sdcPureParts.push(symbolDivCashflowsPure)
     sfxRetParts.push(symbolFxReturns)
-    allSortedDates = sortedDates
   }
 
   if (pvParts.length === 0) {

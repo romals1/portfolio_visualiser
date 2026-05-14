@@ -76,4 +76,5 @@ Thin API for price fetching and CSV parsing. One-way pipeline: routers call serv
 
 Always output with succinct language.
 When running commands that may produce large output such as running tests, checks, or builds, always pipe stdout and stderr to a temporary file and only read it if necessary. Always delete the file when done.
+Do not output diffs unless absolutely necessary to explain something.
 For any tasks where you need to retry or do something differently, always add an instruction bullet point below this line to remember next time.
