@@ -6,6 +6,7 @@ import Spinner from './Spinner'
 type View = 'total' | 'by_symbol'
 type Metric = 'portfolio_value' | 'net_return' | 'rolling_performance' | 'rolling_return' | 'cumulative_performance' | 'breakdown'
 type Range = 'All' | 'YTD' | '1M' | '3M' | '6M' | '1Y' | '3Y' | '5Y'
+type BenchmarkMode = 'none' | 'VOO' | 'IOZ.AX' | 'custom'
 
 interface Props {
   computeResult: ComputeResult | null
@@ -15,7 +16,7 @@ interface Props {
   onClearCache: () => void
 }
 
-function RadioGroup<T extends string>({
+function SelectField<T extends string>({
   label, options, value, onChange
 }: {
   label: string
@@ -26,21 +27,15 @@ function RadioGroup<T extends string>({
   return (
     <div className="space-y-1">
       <p className="text-xs text-gray-500 uppercase tracking-wide">{label}</p>
-      <div className="flex flex-wrap gap-2">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as T)}
+        className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-500"
+      >
         {options.map((o) => (
-          <button
-            key={o.value}
-            onClick={() => onChange(o.value)}
-            className={`px-3 py-1 text-sm rounded-lg transition-colors ${
-              value === o.value
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-700'
-            }`}
-          >
-            {o.label}
-          </button>
+          <option key={o.value} value={o.value}>{o.label}</option>
         ))}
-      </div>
+      </select>
     </div>
   )
 }
@@ -50,11 +45,27 @@ export default function ChartArea({ computeResult, isComputing, benchmarkTickers
   const [metric, setMetric] = useState<Metric>('portfolio_value')
   const [range, setRange] = useState<Range>('All')
   const [rollingWindow, setRollingWindow] = useState(60)
-  const [benchmarkInput, setBenchmarkInput] = useState('')
+  const [benchmarkMode, setBenchmarkMode] = useState<BenchmarkMode>('none')
+  const [customBenchmarkInput, setCustomBenchmarkInput] = useState('')
 
-  const handleBenchmarkChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleBenchmarkModeChange = (mode: BenchmarkMode) => {
+    setBenchmarkMode(mode)
+    if (mode === 'none') {
+      onBenchmarkChange([])
+    } else if (mode === 'custom') {
+      const tickers = customBenchmarkInput
+        .split(',')
+        .map((t) => t.trim().toUpperCase())
+        .filter(Boolean)
+      onBenchmarkChange(tickers)
+    } else {
+      onBenchmarkChange([mode])
+    }
+  }
+
+  const handleCustomInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.target.value
-    setBenchmarkInput(input)
+    setCustomBenchmarkInput(input)
     const tickers = input
       .split(',')
       .map((t) => t.trim().toUpperCase())
@@ -62,24 +73,13 @@ export default function ChartArea({ computeResult, isComputing, benchmarkTickers
     onBenchmarkChange(tickers)
   }
 
-  const rangeOptions: { value: Range; label: string }[] = [
-    { value: 'All', label: 'All' },
-    { value: 'YTD', label: 'YTD' },
-    { value: '1M', label: '1M' },
-    { value: '3M', label: '3M' },
-    { value: '6M', label: '6M' },
-    { value: '1Y', label: '1Y' },
-    { value: '3Y', label: '3Y' },
-    { value: '5Y', label: '5Y' },
-  ]
-
   return (
     <div className="space-y-6">
       <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6 space-y-5">
         <h2 className="text-lg font-medium">Chart controls</h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          <RadioGroup
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <SelectField
             label="View"
             options={[
               { value: 'total', label: 'Total portfolio' },
@@ -88,7 +88,7 @@ export default function ChartArea({ computeResult, isComputing, benchmarkTickers
             value={view}
             onChange={setView}
           />
-          <RadioGroup
+          <SelectField
             label="Metric"
             options={[
               { value: 'portfolio_value', label: 'Portfolio value' },
@@ -101,9 +101,45 @@ export default function ChartArea({ computeResult, isComputing, benchmarkTickers
             value={metric}
             onChange={setMetric}
           />
+          <SelectField
+            label="Range"
+            options={[
+              { value: 'All', label: 'All' },
+              { value: 'YTD', label: 'YTD' },
+              { value: '1M', label: '1M' },
+              { value: '3M', label: '3M' },
+              { value: '6M', label: '6M' },
+              { value: '1Y', label: '1Y' },
+              { value: '3Y', label: '3Y' },
+              { value: '5Y', label: '5Y' },
+            ]}
+            value={range}
+            onChange={setRange}
+          />
+          <SelectField
+            label="Benchmark"
+            options={[
+              { value: 'none', label: 'None' },
+              { value: 'VOO', label: 'VOO' },
+              { value: 'IOZ.AX', label: 'IOZ.AX' },
+              { value: 'custom', label: 'Custom…' },
+            ]}
+            value={benchmarkMode}
+            onChange={handleBenchmarkModeChange}
+          />
         </div>
 
-        <RadioGroup label="Range" options={rangeOptions} value={range} onChange={setRange} />
+        {benchmarkMode === 'custom' && (
+          <div className="space-y-1">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">Custom benchmarks</p>
+            <input
+              value={customBenchmarkInput}
+              onChange={handleCustomInputChange}
+              placeholder="Yahoo Finance tickers, comma-separated — e.g. ^AXJO, ^GSPC"
+              className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+        )}
 
         {(metric === 'rolling_performance' || metric === 'rolling_return') && (
           <div className="space-y-1">
@@ -121,16 +157,6 @@ export default function ChartArea({ computeResult, isComputing, benchmarkTickers
             />
           </div>
         )}
-
-        <div className="space-y-1">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Benchmarks</p>
-          <input
-            value={benchmarkInput}
-            onChange={handleBenchmarkChange}
-            placeholder="Yahoo Finance tickers, comma-separated — e.g. ^AXJO, ^GSPC"
-            className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-500"
-          />
-        </div>
 
         {isComputing && (
           <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
