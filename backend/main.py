@@ -16,14 +16,6 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    run_migrations()
-    # Initialize distributed tracing
-    try:
-        from .services.tracing import init_tracing
-
-        init_tracing(_app)
-    except Exception:
-        logger.warning("Failed to initialise tracing; continuing without", exc_info=True)
     yield
     # Shut down tracing
     try:
@@ -34,7 +26,17 @@ async def lifespan(_app: FastAPI):
         logger.warning("Failed to shut down tracing", exc_info=True)
 
 
+# –– Startup: migrations + tracing (must run before the first request) ––
+run_migrations()
+
 app = FastAPI(title="Portfolio Returns API", version="2.0.0", lifespan=lifespan)
+
+try:
+    from .services.tracing import init_tracing
+
+    init_tracing(app)
+except Exception:
+    logger.warning("Failed to initialise tracing; continuing without", exc_info=True)
 
 allowed_origins = [
     "http://localhost:5173",

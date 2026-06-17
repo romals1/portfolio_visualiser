@@ -1,20 +1,15 @@
 from __future__ import annotations
 
 import logging
-import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 from datetime import date, timedelta
-from typing import Generator
 
 import pandas as pd
 
-logger = logging.getLogger(__name__)
+from . import db
 
-_POOL = None
-_POOL_LOCK = threading.Lock()
-_DB_DISABLED = False
+logger = logging.getLogger(__name__)
 
 _SAVE_EXECUTOR: ThreadPoolExecutor | None = None
 _SAVE_EXECUTOR_LOCK = threading.Lock()
@@ -32,50 +27,19 @@ def _get_save_executor() -> ThreadPoolExecutor:
         return _SAVE_EXECUTOR
 
 
-def _get_pool():
-    global _POOL, _DB_DISABLED
-    if _DB_DISABLED:
-        return None
-    if _POOL is not None:
-        return _POOL
-    with _POOL_LOCK:
-        if _POOL is not None:
-            return _POOL
-        if _DB_DISABLED:
-            return None
-        db_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
-        if not db_url:
-            _DB_DISABLED = True
-            return None
-        try:
-            import psycopg2.pool
-            _POOL = psycopg2.pool.ThreadedConnectionPool(1, 5, db_url)
-            return _POOL
-        except Exception as exc:
-            logger.warning("Price cache DB unavailable: %s", exc)
-            _DB_DISABLED = True
-            return None
+db_available = db.db_available
 
 
-def db_available() -> bool:
-    return _get_pool() is not None
+def _expand_in(sql: str, values: list, params: list) -> tuple[str, list]:
+    """Replace = ANY(%s) with IN (?, ?, ...) for SQLite.
 
-
-@contextmanager
-def _conn() -> Generator:
-    pool = _get_pool()
-    if pool is None:
-        yield None
-        return
-    conn = pool.getconn()
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        pool.putconn(conn)
+    For Postgres this is a no-op (psycopg2 handles ANY natively).
+    """
+    if db.is_postgres:
+        return sql, params
+    placeholders = ", ".join(["?"] * len(values))
+    sql = sql.replace("= ANY(%s)", f"IN ({placeholders})")
+    return sql, params
 
 
 def gaps(
@@ -83,10 +47,7 @@ def gaps(
     req_end: date,
     covered: list[tuple[date, date]],
 ) -> list[tuple[date, date]]:
-    """Return sub-ranges of [req_start, req_end) not covered by the given intervals.
-
-    req_end is exclusive (like yfinance end). covered ranges are inclusive on both ends.
-    """
+    """Return sub-ranges of [req_start, req_end) not covered by the given intervals."""
     req_end_incl = req_end - timedelta(days=1)
     intervals = sorted(covered)
     cursor = req_start
@@ -111,32 +72,32 @@ def load_prices_batch(
     start: date,
     end: date,
 ) -> tuple[dict[str, pd.Series], dict[str, list[tuple[date, date]]]]:
-    """Load cached prices for many symbols in two SQL roundtrips.
-
-    Returns ({symbol: Series}, {symbol: [(range_start, range_end), ...]}). Missing
-    symbols simply absent from the returned dicts. end is exclusive.
-    """
+    """Load cached prices for many symbols."""
     if not yahoo_symbols:
         return {}, {}
-    with _conn() as conn:
-        if conn is None:
-            return {}, {}
-        try:
+    try:
+        with db.get_conn() as conn:
             cur = conn.cursor()
             end_incl = end - timedelta(days=1)
-            cur.execute(
+
+            price_sql = (
                 "SELECT yahoo_symbol, price_date, close_price FROM ticker_prices "
                 "WHERE yahoo_symbol = ANY(%s) AND price_date >= %s AND price_date <= %s "
-                "ORDER BY yahoo_symbol, price_date",
-                (yahoo_symbols, start, end_incl),
+                "ORDER BY yahoo_symbol, price_date"
             )
-            price_rows = cur.fetchall()
-            cur.execute(
+            range_sql = (
                 "SELECT yahoo_symbol, range_start, range_end FROM ticker_fetch_ranges "
                 "WHERE yahoo_symbol = ANY(%s) AND kind = 'price' "
-                "AND range_end >= %s AND range_start <= %s",
-                (yahoo_symbols, start, end_incl),
+                "AND range_end >= %s AND range_start <= %s"
             )
+
+            price_sql, _ = _expand_in(price_sql, yahoo_symbols, [])
+            range_sql, _ = _expand_in(range_sql, yahoo_symbols, [])
+
+            params = yahoo_symbols + [start, end_incl]
+            db.db_execute(cur, price_sql, tuple(params))
+            price_rows = cur.fetchall()
+            db.db_execute(cur, range_sql, tuple(params))
             range_rows = cur.fetchall()
             cur.close()
 
@@ -154,9 +115,9 @@ def load_prices_batch(
                 covered_map.setdefault(sym, []).append((rs, re_))
 
             return series_map, covered_map
-        except Exception as exc:
-            logger.warning("load_prices_batch DB error: %s", exc)
-            return {}, {}
+    except Exception as exc:
+        logger.warning("load_prices_batch DB error: %s", exc)
+        return {}, {}
 
 
 def load_dividends_batch(
@@ -164,33 +125,32 @@ def load_dividends_batch(
     start: date,
     end: date,
 ) -> tuple[dict[str, pd.Series], dict[str, list[tuple[date, date]]]]:
-    """Load cached dividends for many symbols in two SQL roundtrips.
-
-    Returns ({symbol: Series}, {symbol: [(range_start, range_end), ...]}). end is exclusive.
-    Symbols with no rows still appear in covered_map if they have a coverage record
-    (i.e. fetched but pay no dividends in window).
-    """
+    """Load cached dividends for many symbols."""
     if not yahoo_symbols:
         return {}, {}
-    with _conn() as conn:
-        if conn is None:
-            return {}, {}
-        try:
+    try:
+        with db.get_conn() as conn:
             cur = conn.cursor()
             end_incl = end - timedelta(days=1)
-            cur.execute(
+
+            div_sql = (
                 "SELECT yahoo_symbol, ex_date, amount FROM ticker_dividends "
                 "WHERE yahoo_symbol = ANY(%s) AND ex_date >= %s AND ex_date <= %s "
-                "ORDER BY yahoo_symbol, ex_date",
-                (yahoo_symbols, start, end_incl),
+                "ORDER BY yahoo_symbol, ex_date"
             )
-            div_rows = cur.fetchall()
-            cur.execute(
+            range_sql = (
                 "SELECT yahoo_symbol, range_start, range_end FROM ticker_fetch_ranges "
                 "WHERE yahoo_symbol = ANY(%s) AND kind = 'dividend' "
-                "AND range_end >= %s AND range_start <= %s",
-                (yahoo_symbols, start, end_incl),
+                "AND range_end >= %s AND range_start <= %s"
             )
+
+            div_sql, _ = _expand_in(div_sql, yahoo_symbols, [])
+            range_sql, _ = _expand_in(range_sql, yahoo_symbols, [])
+
+            params = yahoo_symbols + [start, end_incl]
+            db.db_execute(cur, div_sql, tuple(params))
+            div_rows = cur.fetchall()
+            db.db_execute(cur, range_sql, tuple(params))
             range_rows = cur.fetchall()
             cur.close()
 
@@ -208,15 +168,16 @@ def load_dividends_batch(
                 covered_map.setdefault(sym, []).append((rs, re_))
 
             return series_map, covered_map
-        except Exception as exc:
-            logger.warning("load_dividends_batch DB error: %s", exc)
-            return {}, {}
+    except Exception as exc:
+        logger.warning("load_dividends_batch DB error: %s", exc)
+        return {}, {}
 
 
 def _coalesce_ranges(conn, yahoo_symbol: str, kind: str, new_start: date, new_end: date) -> None:
     """Merge overlapping/adjacent coverage rows into one."""
     cur = conn.cursor()
-    cur.execute(
+    db.db_execute(
+        cur,
         "SELECT range_start, range_end FROM ticker_fetch_ranges "
         "WHERE yahoo_symbol = %s AND kind = %s "
         "AND range_end >= %s AND range_start <= %s",
@@ -228,12 +189,14 @@ def _coalesce_ranges(conn, yahoo_symbol: str, kind: str, new_start: date, new_en
     merged_start = min(all_starts)
     merged_end = max(all_ends)
     if existing:
-        cur.execute(
+        db.db_execute(
+            cur,
             "DELETE FROM ticker_fetch_ranges WHERE yahoo_symbol = %s AND kind = %s "
             "AND range_end >= %s AND range_start <= %s",
             (yahoo_symbol, kind, new_start - timedelta(days=1), new_end + timedelta(days=1)),
         )
-    cur.execute(
+    db.db_execute(
+        cur,
         "INSERT INTO ticker_fetch_ranges (yahoo_symbol, kind, range_start, range_end) "
         "VALUES (%s, %s, %s, %s) ON CONFLICT (yahoo_symbol, kind, range_start) "
         "DO UPDATE SET range_end = EXCLUDED.range_end, fetched_at = now()",
@@ -250,11 +213,7 @@ def save_prices(
 ) -> None:
     """Persist price rows and update coverage range."""
     try:
-        from psycopg2.extras import execute_values
-
-        with _conn() as conn:
-            if conn is None:
-                return
+        with db.get_conn() as conn:
             cur = conn.cursor()
             if not series.empty:
                 rows = [
@@ -263,7 +222,7 @@ def save_prices(
                     if not pd.isna(val)
                 ]
                 if rows:
-                    execute_values(
+                    db.execute_values(
                         cur,
                         "INSERT INTO ticker_prices (yahoo_symbol, price_date, close_price) "
                         "VALUES %s ON CONFLICT DO NOTHING",
@@ -284,11 +243,7 @@ def save_dividends(
 ) -> None:
     """Persist dividend rows and update coverage range."""
     try:
-        from psycopg2.extras import execute_values
-
-        with _conn() as conn:
-            if conn is None:
-                return
+        with db.get_conn() as conn:
             cur = conn.cursor()
             if not series.empty:
                 rows = [
@@ -297,7 +252,7 @@ def save_dividends(
                     if not pd.isna(val)
                 ]
                 if rows:
-                    execute_values(
+                    db.execute_values(
                         cur,
                         "INSERT INTO ticker_dividends (yahoo_symbol, ex_date, amount) "
                         "VALUES %s ON CONFLICT DO NOTHING",

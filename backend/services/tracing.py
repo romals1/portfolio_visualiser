@@ -1,9 +1,8 @@
-"""OpenTelemetry setup with a custom Supabase Postgres SpanExporter."""
+"""OpenTelemetry setup with a unified DB SpanExporter (Postgres or SQLite)."""
 
 from __future__ import annotations
 
 import logging
-import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -14,42 +13,15 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider, ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult, BatchSpanProcessor
 
+from . import db
+
 logger = logging.getLogger(__name__)
 
-_POOL = None
-_POOL_LOCK = threading.Lock()
-_DB_DISABLED = False
 _EXPORT_EXECUTOR: ThreadPoolExecutor | None = None
 _EXPORT_EXECUTOR_LOCK = threading.Lock()
 _SHUTDOWN = False
 
 SERVICE_NAME = "portfolio-api"
-
-
-def _get_pool():
-    global _POOL, _DB_DISABLED
-    if _DB_DISABLED:
-        return None
-    if _POOL is not None:
-        return _POOL
-    with _POOL_LOCK:
-        if _POOL is not None:
-            return _POOL
-        if _DB_DISABLED:
-            return None
-        db_url = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
-        if not db_url:
-            _DB_DISABLED = True
-            logger.info("Tracing: no DATABASE_URL/SUPABASE_DB_URL; spans will not be persisted")
-            return None
-        try:
-            import psycopg2.pool
-            _POOL = psycopg2.pool.ThreadedConnectionPool(1, 3, db_url)
-            return _POOL
-        except Exception as exc:
-            logger.warning("Tracing DB pool unavailable: %s", exc)
-            _DB_DISABLED = True
-            return None
 
 
 def _get_export_executor() -> ThreadPoolExecutor:
@@ -64,15 +36,11 @@ def _get_export_executor() -> ThreadPoolExecutor:
 
 
 class SupabaseSpanExporter(SpanExporter):
-    """Writes spans to the `spans` table in Supabase Postgres."""
+    """Writes spans to the `spans` table (Postgres or SQLite)."""
 
     def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
         global _SHUTDOWN
         if _SHUTDOWN:
-            return SpanExportResult.FAILURE
-
-        pool = _get_pool()
-        if pool is None:
             return SpanExportResult.FAILURE
 
         rows: list[tuple] = []
@@ -117,8 +85,8 @@ class SupabaseSpanExporter(SpanExporter):
                 span.name or "unnamed",
                 kind_str,
                 SERVICE_NAME,
-                datetime.fromtimestamp(start_ns / 1_000_000_000, tz=timezone.utc),
-                datetime.fromtimestamp(end_ns / 1_000_000_000, tz=timezone.utc),
+                datetime.fromtimestamp(start_ns / 1_000_000_000, tz=timezone.utc).isoformat(),
+                datetime.fromtimestamp(end_ns / 1_000_000_000, tz=timezone.utc).isoformat(),
                 duration_ms,
                 status,
                 status_message,
@@ -129,7 +97,7 @@ class SupabaseSpanExporter(SpanExporter):
         if not rows:
             return SpanExportResult.SUCCESS
 
-        _get_export_executor().submit(_insert_rows, pool, rows)
+        _get_export_executor().submit(_insert_rows, rows)
         return SpanExportResult.SUCCESS
 
     def shutdown(self) -> None:
@@ -139,26 +107,33 @@ class SupabaseSpanExporter(SpanExporter):
             _EXPORT_EXECUTOR.shutdown(wait=True)
 
 
-def _insert_rows(pool, rows: list[tuple]) -> None:
+def _insert_rows(rows: list[tuple]) -> None:
     """Bulk-insert span rows on a background thread. Never raises."""
-    try:
-        from psycopg2.extras import execute_values
+    import json
 
-        conn = pool.getconn()
-        try:
+    # Serialize dict columns to JSON strings (SQLite doesn't support dict params)
+    serialized = []
+    for r in rows:
+        attrs = r[11]
+        res = r[12]
+        serialized.append(r[:11] + (
+            json.dumps(attrs) if isinstance(attrs, dict) else str(attrs),
+            json.dumps(res) if isinstance(res, dict) else str(res),
+        ))
+    try:
+        with db.get_conn() as conn:
             cur = conn.cursor()
-            sql = (
+            db.execute_values(
+                cur,
                 "INSERT INTO spans "
                 "(trace_id, span_id, parent_span_id, name, kind, service, "
                 "start_time, end_time, duration_ms, status, status_message, attributes, resource) "
-                "VALUES %s "
-                "ON CONFLICT DO NOTHING"
+                "VALUES %s ON CONFLICT DO NOTHING",
+                serialized,
+                page_size=200,
             )
-            execute_values(cur, sql, rows, page_size=200)
             conn.commit()
             cur.close()
-        finally:
-            pool.putconn(conn)
     except Exception:
         logger.warning("Failed to insert %d span(s)", len(rows), exc_info=True)
 
@@ -191,7 +166,7 @@ def _instrument_requests() -> None:
 
 
 def init_tracing(app) -> TracerProvider:
-    """Set up OpenTelemetry tracing with Supabase exporter. Call once at startup."""
+    """Set up OpenTelemetry tracing. Call once at startup."""
     resource = Resource.create({"service.name": SERVICE_NAME, "service.version": "2.0.0"})
 
     exporter = SupabaseSpanExporter()

@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+import json as json_mod
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from ..services import db
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-_DB_URL = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL")
+_COLS = [
+    "id", "trace_id", "span_id", "parent_span_id", "name", "kind",
+    "service", "start_time", "end_time", "duration_ms", "status",
+    "status_message", "attributes", "resource",
+]
 
 
 class SpanInput(BaseModel):
@@ -23,7 +29,7 @@ class SpanInput(BaseModel):
     name: str
     kind: str = "CLIENT"
     service: str
-    start_time: str  # ISO 8601
+    start_time: str
     end_time: str
     duration_ms: float
     status: str = "OK"
@@ -36,50 +42,49 @@ class TraceRequest(BaseModel):
     spans: list[SpanInput]
 
 
+def _row_to_dict(row) -> dict:
+    """Convert a DB row (tuple or dict) to a dict, deserializing JSON cols."""
+    if isinstance(row, dict):
+        d = dict(row)
+    else:
+        d = {_COLS[i]: row[i] for i in range(len(_COLS))}
+    # Deserialize JSON string cols back to dicts (SQLite stores them as text)
+    for col in ("attributes", "resource"):
+        if isinstance(d.get(col), str):
+            try:
+                d[col] = json_mod.loads(d[col])
+            except (json_mod.JSONDecodeError, TypeError):
+                pass
+    return d
+
+
 @router.post("/traces")
 def receive_frontend_spans(body: TraceRequest):
     """Accept spans from the frontend OTel exporter."""
-    if not _DB_URL:
-        return {"received": len(body.spans), "persisted": False}
-
     try:
-        import psycopg2
-        from psycopg2.extras import execute_values
-
-        rows: list[tuple] = []
-        for s in body.spans:
-            rows.append((
-                s.trace_id,
-                s.span_id,
-                s.parent_span_id,
-                s.name,
-                s.kind,
-                s.service,
-                s.start_time,
-                s.end_time,
-                s.duration_ms,
-                s.status,
-                s.status_message,
-                s.attributes,
-                s.resource,
-            ))
-
-        conn = psycopg2.connect(_DB_URL)
-        try:
-            conn.autocommit = True
+        with db.get_conn() as conn:
+            rows = [
+                (
+                    s.trace_id, s.span_id, s.parent_span_id, s.name, s.kind,
+                    s.service, s.start_time, s.end_time, s.duration_ms,
+                    s.status, s.status_message,
+                    json_mod.dumps(s.attributes),
+                    json_mod.dumps(s.resource),
+                )
+                for s in body.spans
+            ]
             cur = conn.cursor()
-            sql = (
+            db.execute_values(
+                cur,
                 "INSERT INTO spans "
                 "(trace_id, span_id, parent_span_id, name, kind, service, "
                 "start_time, end_time, duration_ms, status, status_message, attributes, resource) "
-                "VALUES %s "
-                "ON CONFLICT DO NOTHING"
+                "VALUES %s ON CONFLICT DO NOTHING",
+                rows,
+                page_size=200,
             )
-            execute_values(cur, sql, rows, page_size=200)
+            conn.commit()
             cur.close()
-        finally:
-            conn.close()
-
         return {"received": len(body.spans), "persisted": True}
     except Exception as exc:
         logger.warning("Failed to persist frontend spans: %s", exc)
@@ -93,21 +98,16 @@ def get_traces(
     service: str | None = None,
     since_minutes: int = Query(60, ge=1, le=1440),
 ):
-    """Return recent traces grouped by trace_id. Each trace includes all its spans."""
-    if not _DB_URL:
-        return {"traces": []}
-
+    """Return recent traces grouped by trace_id."""
     try:
-        import psycopg2
-        import psycopg2.extras
-
         since = datetime.now(tz=timezone.utc) - timedelta(minutes=since_minutes)
-        conn = psycopg2.connect(_DB_URL)
-        try:
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        since_iso = since.isoformat()
+
+        with db.get_conn() as conn:
+            cur = conn.cursor()
 
             where = ["start_time >= %s"]
-            params: list[Any] = [since]
+            params: list[Any] = [since_iso]
 
             if min_duration_ms > 0:
                 where.append("duration_ms >= %s")
@@ -118,42 +118,41 @@ def get_traces(
 
             where_clause = " AND ".join(where)
 
-            cur.execute(
+            trace_sql = (
                 f"SELECT DISTINCT trace_id FROM spans WHERE {where_clause} "
-                "ORDER BY start_time DESC LIMIT %s",
-                params + [limit],
+                "ORDER BY start_time DESC LIMIT %s"
             )
-            trace_ids = [r["trace_id"] for r in cur.fetchall()]
+            db.db_execute(cur, trace_sql, tuple(params + [limit]))
+            trace_ids = [r[0] if not isinstance(r, dict) else r["trace_id"] for r in cur.fetchall()]
 
             if not trace_ids:
+                cur.close()
                 return {"traces": []}
 
-            cur.execute(
-                "SELECT * FROM spans WHERE trace_id = ANY(%s) ORDER BY start_time ASC",
-                (trace_ids,),
-            )
+            detail_sql = "SELECT * FROM spans WHERE trace_id = ANY(%s) ORDER BY start_time ASC"
+            detail_sql, _ = db.expand_in(detail_sql, trace_ids)
+            db.db_execute(cur, detail_sql, tuple(trace_ids))
             rows = cur.fetchall()
+            cur.close()
 
             traces: dict[str, dict] = {}
             for row in rows:
-                tid = row["trace_id"]
+                d = _row_to_dict(row)
+                tid = d["trace_id"]
                 if tid not in traces:
                     traces[tid] = {
                         "trace_id": tid,
-                        "start_time": row["start_time"].isoformat(),
+                        "start_time": str(d["start_time"]),
                         "spans": [],
                     }
-                span = dict(row)
                 for key in ("start_time", "end_time"):
-                    if isinstance(span.get(key), datetime):
-                        span[key] = span[key].isoformat()
-                traces[tid]["spans"].append(span)
+                    if isinstance(d.get(key), datetime):
+                        d[key] = d[key].isoformat()
+                    elif d.get(key) and not isinstance(d.get(key), str):
+                        d[key] = str(d[key])
+                traces[tid]["spans"].append(d)
 
-            cur.close()
-        finally:
-            conn.close()
-
-        result = sorted(traces.values(), key=lambda t: t["start_time"], reverse=True)
+        result = sorted(traces.values(), key=lambda t: str(t.get("start_time", "")), reverse=True)
         return {"traces": result}
     except Exception as exc:
         logger.warning("Failed to query traces: %s", exc)
