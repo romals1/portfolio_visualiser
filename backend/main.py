@@ -31,7 +31,7 @@ async def lifespan(_app: FastAPI):
 
         shutdown_tracing()
     except Exception:
-        pass
+        logger.warning("Failed to shut down tracing", exc_info=True)
 
 
 app = FastAPI(title="Portfolio Returns API", version="2.0.0", lifespan=lifespan)

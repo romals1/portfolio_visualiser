@@ -1,4 +1,5 @@
 import { Transaction, ComputeResult, SymbolData } from '../types'
+import { context, trace } from '@opentelemetry/api'
 import api from '../api/client'
 import { getTracer } from './tracing'
 
@@ -146,6 +147,8 @@ export async function computePortfolio(
       'display.currency': displayCurrency,
     },
   })
+  const rootCtx = trace.setSpan(context.active(), rootSpan)
+  return context.with(rootCtx, async () => {
   try {
   const empty: ComputeResult = {
     dates: [],
@@ -591,4 +594,5 @@ export async function computePortfolio(
     rootSpan.end()
     throw err
   }
+  })
 }

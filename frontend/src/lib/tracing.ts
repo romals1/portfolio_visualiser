@@ -44,7 +44,8 @@ class ApiTraceExporter {
     }
 
     const body = JSON.stringify(payload)
-    const sent = navigator.sendBeacon(this._endpoint, body)
+    const blob = new Blob([body], { type: 'application/json' })
+    const sent = navigator.sendBeacon(this._endpoint, blob)
     if (!sent) {
       fetch(this._endpoint, {
         method: 'POST',

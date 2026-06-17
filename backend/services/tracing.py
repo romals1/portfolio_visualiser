@@ -20,6 +20,7 @@ _POOL = None
 _POOL_LOCK = threading.Lock()
 _DB_DISABLED = False
 _EXPORT_EXECUTOR: ThreadPoolExecutor | None = None
+_EXPORT_EXECUTOR_LOCK = threading.Lock()
 _SHUTDOWN = False
 
 SERVICE_NAME = "portfolio-api"
@@ -55,8 +56,11 @@ def _get_export_executor() -> ThreadPoolExecutor:
     global _EXPORT_EXECUTOR
     if _EXPORT_EXECUTOR is not None:
         return _EXPORT_EXECUTOR
-    _EXPORT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="span-exporter")
-    return _EXPORT_EXECUTOR
+    with _EXPORT_EXECUTOR_LOCK:
+        if _EXPORT_EXECUTOR is not None:
+            return _EXPORT_EXECUTOR
+        _EXPORT_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="span-exporter")
+        return _EXPORT_EXECUTOR
 
 
 class SupabaseSpanExporter(SpanExporter):
