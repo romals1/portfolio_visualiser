@@ -1,22 +1,42 @@
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import auth, portfolio
+from .routers import auth, portfolio, traces
 from .services.migrations import run_migrations
+
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    run_migrations()
     yield
+    # Shut down tracing
+    try:
+        from .services.tracing import shutdown_tracing
 
+        shutdown_tracing()
+    except Exception:
+        logger.warning("Failed to shut down tracing", exc_info=True)
+
+
+# –– Startup: migrations + tracing (must run before the first request) ––
+run_migrations()
 
 app = FastAPI(title="Portfolio Returns API", version="2.0.0", lifespan=lifespan)
+
+try:
+    from .services.tracing import init_tracing
+
+    init_tracing(app)
+except Exception:
+    logger.warning("Failed to initialise tracing; continuing without", exc_info=True)
 
 allowed_origins = [
     "http://localhost:5173",
@@ -37,6 +57,7 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(portfolio.router, prefix="/api", tags=["portfolio"])
+app.include_router(traces.router, prefix="/api", tags=["traces"])
 
 
 @app.get("/api/health")

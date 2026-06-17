@@ -1,5 +1,7 @@
 import { Transaction, ComputeResult, SymbolData } from '../types'
+import { context, trace } from '@opentelemetry/api'
 import api from '../api/client'
+import { getTracer } from './tracing'
 
 interface TransactionWithFields extends Transaction {
   currency: string
@@ -137,6 +139,17 @@ export async function computePortfolio(
   benchmarkTickers: string[] = [],
   displayCurrency: 'USD' | 'AUD' = 'USD'
 ): Promise<ComputeResult> {
+  const tracer = getTracer()
+  const rootSpan = tracer.startSpan('compute-portfolio', {
+    attributes: {
+      'txn.count': transactions.length,
+      'benchmark.count': benchmarkTickers.length,
+      'display.currency': displayCurrency,
+    },
+  })
+  const rootCtx = trace.setSpan(context.active(), rootSpan)
+  return context.with(rootCtx, async () => {
+  try {
   const empty: ComputeResult = {
     dates: [],
     portfolio_value: [],
@@ -152,7 +165,10 @@ export async function computePortfolio(
     failed_tickers: [],
   }
 
-  if (transactions.length === 0) return empty
+  if (transactions.length === 0) {
+    rootSpan.end()
+    return empty
+  }
 
   const txns: TransactionWithFields[] = transactions.map(t => ({
     ...t,
@@ -216,13 +232,19 @@ export async function computePortfolio(
       for (const ccy of fxCurrenciesNeeded) {
         ticketList.push({ ticker: FX_SYMBOLS[ccy], exchange: 'US' })
       }
-      const resp = await api.post<PricesResponse>('/api/prices', {
-        tickers: ticketList,
-        start: startStr,
-        end: endStr,
-      })
-      allPricesData = resp.data.prices
-      allDividendsData = resp.data.dividends || {}
+      const fetchSpan = tracer.startSpan('fetch-prices')
+      let pricesResp: PricesResponse
+      try {
+        pricesResp = (await api.post<PricesResponse>('/api/prices', {
+          tickers: ticketList,
+          start: startStr,
+          end: endStr,
+        })).data
+      } finally {
+        fetchSpan.end()
+      }
+      allPricesData = pricesResp.prices
+      allDividendsData = pricesResp.dividends || {}
 
       for (const ccy of fxCurrenciesNeeded) {
         const sym = FX_SYMBOLS[ccy]
@@ -265,6 +287,10 @@ export async function computePortfolio(
   const sfxRetParts: Record<string, number[]>[] = []
   let allSortedDates: string[] = unifiedDates
 
+  const alignSpan = tracer.startSpan('align-and-compute', {
+    attributes: { 'portfolio.count': currencyMap.size },
+  })
+  try {
   for (const [currency, currencyTxns] of currencyMap) {
     const tradeRows = currencyTxns.filter(t => ['BUY', 'SELL'].includes(t.action))
     if (tradeRows.length === 0) continue
@@ -293,6 +319,14 @@ export async function computePortfolio(
     // We only have AUDUSD=X; USD→AUD just inverts it.
     let fxFeed: PriceData | null = null
     const needsFx = currency !== displayCurrency
+    const sortedDates = unifiedDates
+    let fxAxis: number[]
+    let fxToday: number
+
+    const fxSpan = tracer.startSpan('fx-conversion', {
+      attributes: { 'target.currency': displayCurrency },
+    })
+    try {
     if (needsFx) {
       if (!fxData['AUD']) {
         fetchFailures.push(`${currency}: missing FX rate ${FX_SYMBOLS['AUD']}`)
@@ -301,12 +335,8 @@ export async function computePortfolio(
       fxFeed = fxData['AUD']
     }
 
-    const sortedDates = unifiedDates
-
     // fxAxis: per-bar native→display rate, used for actual display values.
     // fxToday: scalar for the "pure" (FX-stripped) series at today's rate.
-    let fxAxis: number[]
-    let fxToday: number
     if (!needsFx) {
       fxAxis = new Array(sortedDates.length).fill(1)
       fxToday = 1
@@ -320,6 +350,9 @@ export async function computePortfolio(
         fxAxis = audUsd.map(v => 1 / v)
         fxToday = 1 / todayAudUsd
       }
+    }
+    } finally {
+      fxSpan.end()
     }
 
     const prices: Record<string, number[]> = {}
@@ -446,8 +479,12 @@ export async function computePortfolio(
     sdcPureParts.push(symbolDivCashflowsPure)
     sfxRetParts.push(symbolFxReturns)
   }
+  } finally {
+    alignSpan.end()
+  }
 
   if (pvParts.length === 0) {
+    rootSpan.end()
     return { ...empty, failed_tickers: fetchFailures }
   }
 
@@ -537,6 +574,7 @@ export async function computePortfolio(
     }
   }
 
+  rootSpan.end()
   return {
     dates: allSortedDates,
     portfolio_value: sumSeries(pvParts),
@@ -551,4 +589,10 @@ export async function computePortfolio(
     benchmarks: benchmarkData,
     failed_tickers: fetchFailures,
   }
+  } catch (err) {
+    rootSpan.setStatus({ code: 2, message: (err as any)?.message || String(err) })
+    rootSpan.end()
+    throw err
+  }
+  })
 }
