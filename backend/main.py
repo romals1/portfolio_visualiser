@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routers import auth, portfolio
+from .routers import auth, portfolio, traces
 from .services.migrations import run_migrations
 
 
@@ -37,6 +37,7 @@ app.add_middleware(
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(portfolio.router, prefix="/api", tags=["portfolio"])
+app.include_router(traces.router, prefix="/api", tags=["traces"])
 
 
 @app.get("/api/health")
