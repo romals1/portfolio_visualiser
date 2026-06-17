@@ -74,6 +74,10 @@ Thin API for price fetching and CSV parsing. One-way pipeline: routers call serv
 
 ### Agent instructions
 
+Never create merge commits. Always rebase: use `git pull --rebase` (not `git pull`),
+and `git rebase <base>` followed by fast-forward merge (`git merge --ff-only`) instead
+of `git merge`. Keep history linear.
+
 Always output with succinct language.
 When running commands that may produce large output such as running tests, checks, or builds, always pipe stdout and stderr to a temporary file and only read it if necessary. Always delete the file when done.
 Do not output diffs unless absolutely necessary to explain something.
