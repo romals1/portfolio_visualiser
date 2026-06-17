@@ -1,4 +1,5 @@
 -- Distributed tracing spans table.
+-- Idempotent: safe to re-run.
 -- No RLS: spans are operational telemetry, not user data.
 create table if not exists spans (
   id              bigserial primary key,
@@ -17,6 +18,6 @@ create table if not exists spans (
   resource        jsonb default '{}'
 );
 
-create index if not exists idx_spans_trace_id on spans (trace_id);
-create index if not exists idx_spans_start_time on spans (start_time desc);
-create index if not exists idx_spans_name on spans (name);
+create index if not exists spans_trace_id_idx on spans (trace_id);
+create index if not exists spans_start_time_idx on spans (start_time desc);
+create index if not exists spans_name_idx on spans (name);
