@@ -1,0 +1,83 @@
+{
+  "planPath": "docs/superpowers/plans/2026-06-17-distributed-tracing.md",
+  "tasks": [
+    {
+      "id": 2,
+      "subject": "Task 1: Add spans migration",
+      "status": "pending",
+      "blockedBy": [],
+      "description": "**Goal:** Create the `spans` table in Supabase Postgres so spans have somewhere to land.\n\n**Files:**\n- Create: `backend/migrations/0006_spans.sql`\n\n**Acceptance Criteria:**\n- [ ] Migration runs via `run_migrations()` at server startup\n- [ ] Table has all columns from the design spec\n- [ ] Indexes exist on `trace_id`, `start_time`, and `name`\n- [ ] Consistent with existing migration style (no RLS, `create table if not exists`)\n\n**Verify:** Start the backend with `DATABASE_URL` set → check Supabase for the `spans` table.\n\n```json:metadata\n{\"files\": [\"backend/migrations/0006_spans.sql\"], \"verifyCommand\": \"psql $DATABASE_URL -c '\\\\d spans'\", \"acceptanceCriteria\": [\"Migration runs via run_migrations()\", \"Table has all columns\", \"Indexes on trace_id, start_time, name exist\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 2: Add backend OTel dependencies",
+      "status": "pending",
+      "blockedBy": [],
+      "description": "**Goal:** Add OpenTelemetry packages to `requirements.txt`.\n\n**Files:**\n- Modify: `backend/requirements.txt`\n\n**Acceptance Criteria:**\n- [ ] All 5 OTel packages pinned to compatible versions\n- [ ] `pip install -r backend/requirements.txt` succeeds\n\n**Verify:** `cd backend && pip install -r requirements.txt` → no errors.\n\n```json:metadata\n{\"files\": [\"backend/requirements.txt\"], \"verifyCommand\": \"cd backend && pip install -r requirements.txt\", \"acceptanceCriteria\": [\"5 OTel packages added with compatible versions\", \"pip install succeeds\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 3: Create backend tracing service",
+      "status": "pending",
+      "blockedBy": [2, 3],
+      "description": "**Goal:** Create `backend/services/tracing.py` — initializes OTel with a custom Supabase `SpanExporter` and auto-instrumentation.\n\n**Files:**\n- Create: `backend/services/tracing.py`\n\n**Acceptance Criteria:**\n- [ ] `init_tracing()` configures `TracerProvider` with a custom exporter\n- [ ] Custom exporter implements `SpanExporter` and uses `psycopg2.extras.execute_values` for bulk insert into the `spans` table\n- [ ] Uses its own `ThreadedConnectionPool` (1-3 connections, separate from price cache pool) reading `DATABASE_URL` or `SUPABASE_DB_URL`\n- [ ] `FastAPIInstrumentor().instrument_app(app)` auto-traces all routes\n- [ ] `Psycopg2Instrumentor().instrument()` auto-traces all DB queries\n- [ ] `RequestsInstrumentor().instrument()` auto-traces yfinance HTTP calls\n- [ ] Export runs on a background thread via `ThreadPoolExecutor(max_workers=1)`\n- [ ] Export failures are logged, never raised\n- [ ] `shutdown_tracing()` flushes remaining spans\n\n**Verify:** Start backend, hit any endpoint, check `spans` table has rows.\n\n```json:metadata\n{\"files\": [\"backend/services/tracing.py\"], \"verifyCommand\": \"curl -s http://localhost:8000/api/health && sleep 3 && echo 'check spans table for rows'\", \"acceptanceCriteria\": [\"init_tracing() sets up TracerProvider with Supabase exporter\", \"Custom SpanExporter bulk-inserts spans\", \"FastAPI, psycopg2, requests auto-instrumented\", \"Export on background thread, failures logged\", \"shutdown_tracing() flushes\"]}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 4: Wire tracing into backend main.py",
+      "status": "pending",
+      "blockedBy": [4],
+      "description": "**Goal:** Initialize OTel tracing at server startup via the existing lifespan handler.\n\n**Files:**\n- Modify: `backend/main.py`\n\n**Acceptance Criteria:**\n- [ ] `init_tracing(app)` called during lifespan startup\n- [ ] `shutdown_tracing()` called during lifespan shutdown\n- [ ] Tracing setup failure does not prevent server start (try/except)\n\n**Verify:** Start backend → log message \"OpenTelemetry tracing initialised\" appears.\n\n```json:metadata\n{\"files\": [\"backend/main.py\"], \"verifyCommand\": \"cd backend && uvicorn backend.main:app --port 8000 2>&1 | head -20\", \"acceptanceCriteria\": [\"init_tracing(app) called at startup\", \"shutdown_tracing() called at shutdown\", \"Failure does not prevent server start\"]}\n```"
+    },
+    {
+      "id": 6,
+      "subject": "Task 5: Create traces API router",
+      "status": "pending",
+      "blockedBy": [2],
+      "description": "**Goal:** Add `POST /api/traces` (receives frontend spans) and `GET /api/traces` (queries spans for the viewer).\n\n**Files:**\n- Create: `backend/routers/traces.py`\n- Modify: `backend/main.py` (register the router)\n\n**Acceptance Criteria:**\n- [ ] `POST /api/traces` accepts a JSON array of spans and inserts them via the same `spans` table\n- [ ] `GET /api/traces` returns traces grouped by `trace_id`, with query params: `limit` (default 50), `min_duration_ms`, `service`, `since_minutes`\n- [ ] Both endpoints gracefully no-op when `DATABASE_URL` is absent\n- [ ] Router follows the same pattern as `auth.py` (APIRouter, pydantic models)\n\n**Verify:** `curl -X POST localhost:8000/api/traces -H 'Content-Type: application/json' -d '[{...}]'` → 200. `curl localhost:8000/api/traces` → 200 with JSON.\n\n```json:metadata\n{\"files\": [\"backend/routers/traces.py\", \"backend/main.py\"], \"verifyCommand\": \"curl -s http://localhost:8000/api/traces | jq .\", \"acceptanceCriteria\": [\"POST /api/traces accepts and inserts frontend spans\", \"GET /api/traces returns traces grouped by trace_id with filter params\", \"Graceful no-op when DATABASE_URL absent\", \"Follows auth.py router pattern\"]}\n```"
+    },
+    {
+      "id": 7,
+      "subject": "Task 6: Add frontend OTel dependencies",
+      "status": "pending",
+      "blockedBy": [],
+      "description": "**Goal:** Add OpenTelemetry JS packages to the frontend.\n\n**Files:**\n- Modify: `frontend/package.json`\n\n**Acceptance Criteria:**\n- [ ] `@opentelemetry/api`, `@opentelemetry/sdk-trace-web`, `@opentelemetry/instrumentation-xml-http-request` added to dependencies\n- [ ] `npm install` succeeds\n\n**Verify:** `cd frontend && npm install` → no errors.\n\n```json:metadata\n{\"files\": [\"frontend/package.json\"], \"verifyCommand\": \"cd frontend && npm install 2>&1 | tail -5\", \"acceptanceCriteria\": [\"Three OTel JS packages added\", \"npm install succeeds\"]}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 7: Create frontend tracing library",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** Create `frontend/src/lib/tracing.ts` — initializes OTel web SDK with a custom exporter that POSTs spans to `/api/traces`.\n\n**Files:**\n- Create: `frontend/src/lib/tracing.ts`\n\n**Acceptance Criteria:**\n- [ ] `initFrontendTracing()` sets up `WebTracerProvider` with `BatchSpanProcessor`\n- [ ] Custom exporter implements `SpanExporter` interface and POSTs JSON to `/api/traces`\n- [ ] XHR instrumentation auto-traces axios API calls\n- [ ] `getTracer()` returns an OTel tracer for creating manual spans\n- [ ] `withSpan()` helper wraps async functions with a span\n- [ ] Frontend service name is `\"portfolio-frontend\"`\n\n**Verify:** Open browser devtools Network tab → after page load, `POST /api/traces` requests appear periodically.\n\n```json:metadata\n{\"files\": [\"frontend/src/lib/tracing.ts\"], \"verifyCommand\": \"cd frontend && npm run dev 2>&1 | head -10\", \"acceptanceCriteria\": [\"initFrontendTracing sets up WebTracerProvider\", \"Custom exporter POSTs to /api/traces\", \"XHR instrumentation covers axios\", \"getTracer and withSpan helpers exported\"]}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 8: Wire frontend tracing into main.tsx",
+      "status": "pending",
+      "blockedBy": [8],
+      "description": "**Goal:** Call `initFrontendTracing()` at app startup.\n\n**Files:**\n- Modify: `frontend/src/main.tsx`\n\n**Acceptance Criteria:**\n- [ ] Tracing initialized before `<App />` renders\n\n**Verify:** `npm run dev` → no console errors. Check Network tab for POST /api/traces.\n\n```json:metadata\n{\"files\": [\"frontend/src/main.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit src/main.tsx 2>&1\", \"acceptanceCriteria\": [\"initFrontendTracing() called before <App /> renders\"]}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 9: Add manual spans to computation.ts",
+      "status": "pending",
+      "blockedBy": [8],
+      "description": "**Goal:** Trace the three key phases of portfolio computation so you can see where time is spent.\n\n**Files:**\n- Modify: `frontend/src/lib/computation.ts`\n\n**Acceptance Criteria:**\n- [ ] Three manual spans: `compute-portfolio` (top-level), `fetch-prices` (API call), `align-and-compute` (per-portfolio price alignment + return calc), `fx-conversion` (currency conversion)\n- [ ] Spans report duration_ms and relevant attributes (ticker counts, portfolio count, currency)\n- [ ] Computation behavior unchanged\n\n**Verify:** Run a compute → check `spans` table for spans named `compute-portfolio`, `fetch-prices`, `align-and-compute`, `fx-conversion`.\n\n```json:metadata\n{\"files\": [\"frontend/src/lib/computation.ts\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit src/lib/computation.ts 2>&1\", \"acceptanceCriteria\": [\"Manual spans at compute-portfolio, fetch-prices, align-and-compute, fx-conversion\", \"Spans report duration_ms and attributes\", \"Computation behavior unchanged\"]}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 10: Create TraceViewer component",
+      "status": "pending",
+      "blockedBy": [6, 8],
+      "description": "**Goal:** Build the in-app trace viewer — list view + waterfall detail.\n\n**Files:**\n- Create: `frontend/src/components/TraceViewer.tsx`\n\n**Acceptance Criteria:**\n- [ ] List view: recent traces with timestamp, span count, total duration, slowest span\n- [ ] Waterfall detail: horizontal bars per span, indented by depth, color-coded (green < 100ms, yellow < 1000ms, red >= 1000ms)\n- [ ] Click a span to expand attributes/metadata JSONB\n- [ ] Click a trace row to open the waterfall\n- [ ] Fetches `GET /api/traces?limit=50&since_minutes=60` on mount\n- [ ] Refresh button to re-fetch\n- [ ] Matches existing dark/light theme via Tailwind classes\n- [ ] Graceful empty state when no traces exist\n- [ ] Error state when API is unavailable\n\n**Verify:** `npm run dev` → click Traces tab → see traces waterfall.\n\n```json:metadata\n{\"files\": [\"frontend/src/components/TraceViewer.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit src/components/TraceViewer.tsx 2>&1\", \"acceptanceCriteria\": [\"List view with timestamp, spans, duration, slowest span\", \"Waterfall with color-coded bars indented by depth\", \"Click to expand attributes JSONB\", \"Refresh button\", \"Dark/light theme support\", \"Empty and error states\"]}\n```"
+    },
+    {
+      "id": 12,
+      "subject": "Task 11: Add Traces tab to App.tsx",
+      "status": "pending",
+      "blockedBy": [11],
+      "description": "**Goal:** Add a \"Traces\" tab to the existing tab bar so users can access the trace viewer.\n\n**Files:**\n- Modify: `frontend/src/App.tsx`\n\n**Acceptance Criteria:**\n- [ ] \"Traces\" tab appears alongside Transactions, Holdings, Chart\n- [ ] `activeTab` type union includes `'traces'`\n- [ ] TraceViewer only renders when the Traces tab is active (lazy: data fetched on tab activation)\n- [ ] Existing tabs continue to work unchanged\n\n**Verify:** `npm run dev` → see 4 tabs → click Traces → see TraceViewer.\n\n```json:metadata\n{\"files\": [\"frontend/src/App.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit src/App.tsx 2>&1\", \"acceptanceCriteria\": [\"Traces tab in tab bar\", \"activeTab type includes traces\", \"TraceViewer renders on tab activation\", \"Existing tabs unchanged\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-06-17T10:26:00Z"
+}
