@@ -4,6 +4,7 @@ import UploadModal from './components/UploadModal'
 import TransactionTable, { emptyRow } from './components/TransactionTable'
 import HoldingsTable from './components/HoldingsTable'
 import ChartArea from './components/ChartArea'
+import TraceViewer from './components/TraceViewer'
 import PortfolioStats from './components/PortfolioStats'
 import Tabs from './components/Tabs'
 import Spinner from './components/Spinner'
@@ -28,7 +29,7 @@ export default function App() {
   const [displayCurrency, setDisplayCurrency] = useState<'USD' | 'AUD'>(
     () => (localStorage.getItem('display_currency') as 'USD' | 'AUD') || 'USD',
   )
-  const [activeTab, setActiveTab] = useState<'transactions' | 'holdings' | 'chart'>('transactions')
+  const [activeTab, setActiveTab] = useState<'transactions' | 'holdings' | 'chart' | 'traces'>('transactions')
   const [uploadOpen, setUploadOpen] = useState(false)
   const computeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const computeRequestIdRef = useRef(0)
@@ -373,9 +374,10 @@ export default function App() {
                 { id: 'transactions', label: 'Transactions' },
                 { id: 'holdings', label: 'Holdings' },
                 { id: 'chart', label: 'Chart' },
+                { id: 'traces', label: 'Traces' },
               ]}
               active={activeTab}
-              onChange={(id) => setActiveTab(id as 'transactions' | 'holdings' | 'chart')}
+              onChange={(id) => setActiveTab(id as 'transactions' | 'holdings' | 'chart' | 'traces')}
             />
             <div role="tabpanel" className={activeTab === 'transactions' ? '' : 'hidden'}>
               <TransactionTable
@@ -395,6 +397,9 @@ export default function App() {
                 onBenchmarkChange={setBenchmarkTickers}
                 onClearCache={handleClearCache}
               />
+            </div>
+            <div role="tabpanel" className={activeTab === 'traces' ? '' : 'hidden'}>
+              <TraceViewer />
             </div>
           </div>
         )}
