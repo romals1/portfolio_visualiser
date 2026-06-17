@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -10,10 +11,27 @@ from .routers import auth, portfolio, traces
 from .services.migrations import run_migrations
 
 
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     run_migrations()
+    # Initialize distributed tracing
+    try:
+        from .services.tracing import init_tracing
+
+        init_tracing(_app)
+    except Exception:
+        logger.warning("Failed to initialise tracing; continuing without", exc_info=True)
     yield
+    # Shut down tracing
+    try:
+        from .services.tracing import shutdown_tracing
+
+        shutdown_tracing()
+    except Exception:
+        pass
 
 
 app = FastAPI(title="Portfolio Returns API", version="2.0.0", lifespan=lifespan)
