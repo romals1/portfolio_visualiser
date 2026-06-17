@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Run the backend
-cd backend && uvicorn main:app --reload --port 8000
+# Run the backend (from project root — relative imports in main.py require it)
+uvicorn backend.main:app --reload --port 8000
 
 # Run the frontend (separate terminal)
 cd frontend && npm run dev
