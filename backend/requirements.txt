@@ -11,3 +11,9 @@ pyarrow==17.0.0
 supabase>=2.0.0
 pydantic>=2.0.0
 psycopg2-binary>=2.9
+# OpenTelemetry — distributed tracing
+opentelemetry-api>=1.27,<2
+opentelemetry-sdk>=1.27,<2
+opentelemetry-instrumentation-fastapi>=0.48b0,<1
+opentelemetry-instrumentation-psycopg2>=0.48b0,<1
+opentelemetry-instrumentation-requests>=0.48b0,<1
